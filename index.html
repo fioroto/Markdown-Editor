@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MarkDown Editor</title>
+    <meta name="description"
+        content="Editor de Markdown local com auto-save. Edite arquivos .md direto no seu computador pelo navegador.">
+
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
+        rel="stylesheet">
+
+    <!-- Highlight.js -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+
+    <!-- Marked.js -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.1/marked.min.js"></script>
+
+    <!-- Mermaid.js -->
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+    <div id="app">
+        <!-- Sidebar -->
+        <aside id="sidebar">
+            <div class="sidebar-header">
+                <h1 class="logo">MD Editor</h1>
+                <button id="btn-open-folder" class="btn-primary" title="Abrir pasta local">
+                    <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                        <path d="M1.5 2.5h4.25l1.5 1.5h7.25v9.5h-13v-11z" stroke="currentColor" stroke-width="1.3"
+                            stroke-linejoin="round" fill="none" />
+                        <path d="M1.5 6h13" stroke="currentColor" stroke-width="1.3" />
+                    </svg>
+                    Abrir Pasta
+                </button>
+            </div>
+
+            <div id="file-list-container">
+                <div class="file-list-header">
+                    <span class="file-list-title">ARQUIVOS</span>
+                    <button id="btn-new-file" class="btn-icon" title="Novo arquivo">
+                        <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                            <path d="M7 1v12M1 7h12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
+                        </svg>
+                    </button>
+                </div>
+                <ul id="file-list">
+                    <li class="empty-state">Nenhuma pasta aberta</li>
+                </ul>
+            </div>
+
+            <div class="sidebar-footer">
+                <span class="compat-note">Chrome / Edge</span>
+            </div>
+        </aside>
+
+        <!-- Main Content -->
+        <main id="main">
+            <!-- Toolbar -->
+            <div id="toolbar">
+                <div class="toolbar-group">
+                    <button class="tool-btn" data-action="heading" title="Título (Ctrl+H)">
+                        <strong>H</strong>
+                    </button>
+                    <button class="tool-btn" data-action="bold" title="Negrito (Ctrl+B)">
+                        <strong>B</strong>
+                    </button>
+                    <button class="tool-btn" data-action="italic" title="Itálico (Ctrl+I)">
+                        <em>I</em>
+                    </button>
+                    <button class="tool-btn" data-action="strikethrough" title="Tachado">
+                        <s>S</s>
+                    </button>
+                    <div class="toolbar-divider"></div>
+                    <button class="tool-btn" data-action="code" title="Código inline">
+                        <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                            <path d="M5.5 3.5L2 8l3.5 4.5M10.5 3.5L14 8l-3.5 4.5" stroke="currentColor"
+                                stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" />
+                        </svg>
+                    </button>
+                    <button class="tool-btn" data-action="codeblock" title="Bloco de código">
+                        <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                            <rect x="2" y="2" width="12" height="12" rx="2" stroke="currentColor" stroke-width="1.2"
+                                fill="none" />
+                            <path d="M5 6l-1.5 2L5 10M8 5l-1 6M11 6l1.5 2L11 10" stroke="currentColor" stroke-width="1"
+                                stroke-linecap="round" stroke-linejoin="round" />
+                        </svg>
+                    </button>
+                    <div class="toolbar-divider"></div>
+                    <button class="tool-btn" data-action="link" title="Link">
+                        <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                            <path d="M6.5 9.5a3 3 0 004.24 0l2-2a3 3 0 00-4.24-4.24l-1 1" stroke="currentColor"
+                                stroke-width="1.2" stroke-linecap="round" />
+                            <path d="M9.5 6.5a3 3 0 00-4.24 0l-2 2a3 3 0 004.24 4.24l1-1" stroke="currentColor"
+                                stroke-width="1.2" stroke-linecap="round" />
+                        </svg>
+                    </button>
+                    <button class="tool-btn" data-action="image" title="Imagem">
+                        <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                            <rect x="2" y="3" width="12" height="10" rx="1.5" stroke="currentColor" stroke-width="1.2"
+                                fill="none" />
+                            <circle cx="5.5" cy="6.5" r="1.2" stroke="currentColor" stroke-width="1" fill="none" />
+                            <path d="M2 11l3.5-3 2.5 2 2.5-1.5L14 11" stroke="currentColor" stroke-width="1.2"
+                                stroke-linejoin="round" />
+                        </svg>
+                    </button>
+                    <div class="toolbar-divider"></div>
+                    <button class="tool-btn" data-action="ul" title="Lista não-ordenada">
+                        <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                            <circle cx="3" cy="4.5" r="1" fill="currentColor" />
+                            <circle cx="3" cy="8" r="1" fill="currentColor" />
+                            <circle cx="3" cy="11.5" r="1" fill="currentColor" />
+                            <path d="M6 4.5h8M6 8h8M6 11.5h8" stroke="currentColor" stroke-width="1.3"
+                                stroke-linecap="round" />
+                        </svg>
+                    </button>
+                    <button class="tool-btn" data-action="ol" title="Lista ordenada">
+                        <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                            <text x="1.5" y="6" font-size="5" fill="currentColor" font-family="Inter">1.</text>
+                            <text x="1.5" y="9.5" font-size="5" fill="currentColor" font-family="Inter">2.</text>
+                            <text x="1.5" y="13" font-size="5" fill="currentColor" font-family="Inter">3.</text>
+                            <path d="M6 4.5h8M6 8h8M6 11.5h8" stroke="currentColor" stroke-width="1.3"
+                                stroke-linecap="round" />
+                        </svg>
+                    </button>
+                    <button class="tool-btn" data-action="quote" title="Citação">
+                        <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                            <path d="M3 4v8" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" />
+                            <path d="M7 5h7M7 8h5M7 11h6" stroke="currentColor" stroke-width="1.2"
+                                stroke-linecap="round" />
+                        </svg>
+                    </button>
+                    <div class="toolbar-divider"></div>
+                    <button class="tool-btn" data-action="hr" title="Linha horizontal">
+                        <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                            <path d="M2 8h12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"
+                                stroke-dasharray="3 2" />
+                        </svg>
+                    </button>
+                    <button class="tool-btn" data-action="table" title="Tabela">
+                        <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                            <rect x="2" y="3" width="12" height="10" rx="1" stroke="currentColor" stroke-width="1.2"
+                                fill="none" />
+                            <path d="M2 6.5h12M2 10h12M6 6.5v6.5M10 6.5v6.5" stroke="currentColor" stroke-width="1" />
+                        </svg>
+                    </button>
+                </div>
+
+                <div class="toolbar-right">
+                    <button id="btn-export-html" class="tool-btn-text" title="Exportar HTML">
+                        <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                            <path d="M4 13h8M8 3v8M5 8l3 3 3-3" stroke="currentColor" stroke-width="1.3"
+                                stroke-linecap="round" stroke-linejoin="round" />
+                        </svg>
+                        Exportar
+                    </button>
+                    <button id="btn-preview-html" class="tool-btn-text" title="Preview HTML em nova aba">
+                        <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                            <rect x="2" y="3" width="12" height="10" rx="1.5" stroke="currentColor" stroke-width="1.2"
+                                fill="none" />
+                            <path d="M2 6h12" stroke="currentColor" stroke-width="1" />
+                            <circle cx="4" cy="4.5" r="0.6" fill="currentColor" />
+                            <circle cx="5.8" cy="4.5" r="0.6" fill="currentColor" />
+                        </svg>
+                        Preview
+                    </button>
+                    <div class="toolbar-divider"></div>
+                    <div id="save-status" class="save-status">
+                        <span class="status-dot"></span>
+                        <span class="status-text">Pronto</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Editor Area -->
+            <div id="editor-area">
+                <!-- Welcome Screen -->
+                <div id="welcome-screen">
+                    <div class="welcome-content">
+                        <h2>MD Editor</h2>
+                        <p>Edite seus arquivos Markdown localmente com preview em tempo real e auto-save.</p>
+                        <button id="btn-welcome-open" class="btn-primary btn-large">
+                            <svg width="20" height="20" viewBox="0 0 16 16" fill="none">
+                                <path d="M1.5 2.5h4.25l1.5 1.5h7.25v9.5h-13v-11z" stroke="currentColor"
+                                    stroke-width="1.3" stroke-linejoin="round" fill="none" />
+                                <path d="M1.5 6h13" stroke="currentColor" stroke-width="1.3" />
+                            </svg>
+                            Abrir Pasta
+                        </button>
+                        <p class="welcome-hint">Funciona com Google Chrome e Microsoft Edge</p>
+                    </div>
+                </div>
+
+                <!-- Split Pane (hidden until a file is open) -->
+                <div id="split-pane" class="hidden">
+                    <div id="editor-pane">
+                        <div class="pane-header">
+                            <span class="pane-label">EDITOR</span>
+                            <span id="file-name" class="file-name"></span>
+                        </div>
+                        <textarea id="editor" spellcheck="false"
+                            placeholder="Comece a escrever em Markdown..."></textarea>
+                    </div>
+                    <div id="resize-handle" title="Arrastar para redimensionar"></div>
+                    <div id="preview-pane">
+                        <div class="pane-header">
+                            <span class="pane-label">PREVIEW</span>
+                        </div>
+                        <div id="preview" class="markdown-body"></div>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- New File Modal -->
+    <div id="modal-overlay" class="modal-overlay hidden">
+        <div class="modal">
+            <h3>Novo Arquivo</h3>
+            <input id="new-file-input" type="text" placeholder="nome-do-arquivo.md" autocomplete="off">
+            <div class="modal-actions">
+                <button id="modal-cancel" class="btn-ghost">Cancelar</button>
+                <button id="modal-create" class="btn-primary">Criar</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Delete Confirm Modal -->
+    <div id="delete-modal-overlay" class="modal-overlay hidden">
+        <div class="modal">
+            <h3>Deletar Arquivo</h3>
+            <p id="delete-confirm-text">Tem certeza que deseja deletar este arquivo?</p>
+            <div class="modal-actions">
+                <button id="delete-cancel" class="btn-ghost">Cancelar</button>
+                <button id="delete-confirm" class="btn-danger">Deletar</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+
+</html>
