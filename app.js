@@ -161,10 +161,10 @@
             folderLi.style.paddingLeft = `${16 + depth * 16}px`;
 
             const childContainer = document.createElement('ul');
-            childContainer.classList.add('folder-children', 'expanded');
+            childContainer.classList.add('folder-children');
 
             folderLi.innerHTML = `
-                <span class="folder-toggle expanded">
+                <span class="folder-toggle">
                     <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
                         <path d="M3 2l4 3-4 3" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
                     </svg>
@@ -347,8 +347,40 @@
         preview.querySelectorAll('pre code').forEach((block) => {
             hljs.highlightElement(block);
         });
+        // Tornar checkboxes interativos
+        bindPreviewCheckboxes();
         // Render Mermaid diagrams
         await renderMermaidBlocks(preview);
+    }
+
+    function bindPreviewCheckboxes() {
+        const checkboxes = preview.querySelectorAll('input[type="checkbox"]');
+        checkboxes.forEach((cb, index) => {
+            cb.disabled = false;
+            cb.style.cursor = 'pointer';
+            cb.addEventListener('change', () => {
+                toggleCheckboxInEditor(index, cb.checked);
+            });
+        });
+    }
+
+    function toggleCheckboxInEditor(index, checked) {
+        const text = editor.value;
+        const regex = /- \[([ xX])\]/g;
+        let match;
+        let count = 0;
+
+        while ((match = regex.exec(text)) !== null) {
+            if (count === index) {
+                const newMark = checked ? 'x' : ' ';
+                const start = match.index + 3; // posição do espaço/x dentro de [ ]
+                editor.value = text.substring(0, start) + newMark + text.substring(start + 1);
+                updatePreview();
+                scheduleAutoSave();
+                return;
+            }
+            count++;
+        }
     }
 
     async function renderMermaidBlocks(container) {
@@ -492,11 +524,11 @@
                 cursorOffset = sel ? replacement.length - 1 : 2;
                 break;
             case 'ul':
-                replacement = `- ${sel || 'item'}`;
+                replacement = `- ${sel || ''}`;
                 cursorOffset = replacement.length;
                 break;
             case 'ol':
-                replacement = `1. ${sel || 'item'}`;
+                replacement = `1. ${sel || ''}`;
                 cursorOffset = replacement.length;
                 break;
             case 'quote':
