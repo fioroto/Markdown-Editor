@@ -100,64 +100,139 @@
 
     async function refreshFileList() {
         if (!dirHandle) return;
-        const files = [];
-        for await (const [name, handle] of dirHandle) {
-            if (handle.kind === 'file' && name.endsWith('.md')) {
-                files.push(name);
-            }
-        }
-        files.sort((a, b) => a.localeCompare(b, 'pt-BR', { sensitivity: 'base' }));
-        renderFileList(files);
+        const tree = await scanDirectory(dirHandle, '');
+        renderFileTree(tree);
     }
 
-    function renderFileList(files) {
+    async function scanDirectory(handle, path) {
+        const entries = { folders: [], files: [] };
+
+        for await (const [name, entryHandle] of handle) {
+            if (entryHandle.kind === 'directory') {
+                const subPath = path ? `${path}/${name}` : name;
+                const children = await scanDirectory(entryHandle, subPath);
+                entries.folders.push({
+                    name: name,
+                    path: subPath,
+                    handle: entryHandle,
+                    children: children
+                });
+            } else if (entryHandle.kind === 'file' && name.endsWith('.md')) {
+                entries.files.push({
+                    name: name,
+                    path: path ? `${path}/${name}` : name,
+                    handle: entryHandle
+                });
+            }
+        }
+
+        entries.folders.sort((a, b) => a.name.localeCompare(b.name, 'pt-BR', { sensitivity: 'base' }));
+        entries.files.sort((a, b) => a.name.localeCompare(b.name, 'pt-BR', { sensitivity: 'base' }));
+
+        return entries;
+    }
+
+    function countFiles(tree) {
+        let count = tree.files.length;
+        for (const folder of tree.folders) {
+            count += countFiles(folder.children);
+        }
+        return count;
+    }
+
+    function renderFileTree(tree) {
         fileList.innerHTML = '';
-        if (files.length === 0) {
+
+        if (countFiles(tree) === 0) {
             fileList.innerHTML = '<li class="empty-state">Nenhum arquivo .md encontrado</li>';
             return;
         }
-        files.forEach((name, i) => {
+
+        renderTreeLevel(tree, fileList, 0);
+    }
+
+    function renderTreeLevel(tree, container, depth) {
+        // Renderizar pastas primeiro
+        tree.folders.forEach(folder => {
+            if (countFiles(folder.children) === 0) return;
+
+            const folderLi = document.createElement('li');
+            folderLi.classList.add('folder-item');
+            folderLi.style.paddingLeft = `${16 + depth * 16}px`;
+
+            const childContainer = document.createElement('ul');
+            childContainer.classList.add('folder-children', 'expanded');
+
+            folderLi.innerHTML = `
+                <span class="folder-toggle expanded">
+                    <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
+                        <path d="M3 2l4 3-4 3" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                </span>
+                <span class="file-icon">📁</span>
+                <span class="folder-label">${folder.name}</span>
+            `;
+
+            folderLi.addEventListener('click', (e) => {
+                if (e.target.closest('.file-item')) return;
+                const toggle = folderLi.querySelector('.folder-toggle');
+                const isExpanded = childContainer.classList.contains('expanded');
+                if (isExpanded) {
+                    childContainer.classList.remove('expanded');
+                    toggle.classList.remove('expanded');
+                } else {
+                    childContainer.classList.add('expanded');
+                    toggle.classList.add('expanded');
+                }
+            });
+
+            container.appendChild(folderLi);
+            renderTreeLevel(folder.children, childContainer, depth + 1);
+            container.appendChild(childContainer);
+        });
+
+        // Renderizar arquivos
+        tree.files.forEach(fileEntry => {
             const li = document.createElement('li');
-            li.style.animationDelay = `${i * 40}ms`;
-            if (name === currentFileName) li.classList.add('active');
+            li.classList.add('file-item');
+            li.style.paddingLeft = `${16 + depth * 16}px`;
+            if (fileEntry.path === currentFileName) li.classList.add('active');
 
             li.innerHTML = `
-        <span class="file-icon">📄</span>
-        <span class="file-label" title="${name}">${name}</span>
-        <button class="file-delete" title="Deletar" data-name="${name}">
-          <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-            <path d="M2.5 2.5l7 7M9.5 2.5l-7 7" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
-          </svg>
-        </button>
-      `;
+                <span class="file-icon">📄</span>
+                <span class="file-label" title="${fileEntry.path}">${fileEntry.name}</span>
+                <button class="file-delete" title="Deletar" data-path="${fileEntry.path}">
+                    <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+                        <path d="M2.5 2.5l7 7M9.5 2.5l-7 7" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
+                    </svg>
+                </button>
+            `;
 
             li.addEventListener('click', (e) => {
                 if (e.target.closest('.file-delete')) return;
-                openFile(name);
+                openFileByPath(fileEntry.path, fileEntry.handle);
             });
 
             li.querySelector('.file-delete').addEventListener('click', (e) => {
                 e.stopPropagation();
-                promptDeleteFile(name);
+                promptDeleteFile(fileEntry.path);
             });
 
-            fileList.appendChild(li);
+            container.appendChild(li);
         });
     }
 
-    async function openFile(name) {
+    async function openFileByPath(path, handle) {
         try {
-            // Save current file if dirty
             if (isDirty && currentFileHandle) {
                 await saveCurrentFile();
             }
 
-            const handle = await dirHandle.getFileHandle(name);
             const file = await handle.getFile();
             const content = await file.text();
 
             currentFileHandle = handle;
-            currentFileName = name;
+            currentFileName = path;
             isDirty = false;
 
             editor.value = content;
@@ -165,6 +240,15 @@
             updateFileName();
             setStatus('saved');
             highlightActiveFile();
+        } catch (err) {
+            console.error('Erro ao abrir arquivo:', err);
+        }
+    }
+
+    async function openFile(name) {
+        try {
+            const handle = await dirHandle.getFileHandle(name);
+            await openFileByPath(name, handle);
         } catch (err) {
             console.error('Erro ao abrir arquivo:', err);
         }
@@ -218,11 +302,20 @@
         deleteOverlay.classList.remove('hidden');
     }
 
-    async function deleteFile(name) {
+    async function deleteFile(path) {
         if (!dirHandle) return;
         try {
-            await dirHandle.removeEntry(name);
-            if (name === currentFileName) {
+            const parts = path.split('/');
+            const fileName = parts.pop();
+            let parentHandle = dirHandle;
+
+            for (const part of parts) {
+                parentHandle = await parentHandle.getDirectoryHandle(part);
+            }
+
+            await parentHandle.removeEntry(fileName);
+
+            if (path === currentFileName) {
                 currentFileHandle = null;
                 currentFileName = '';
                 editor.value = '';
@@ -280,9 +373,9 @@
     }
 
     function highlightActiveFile() {
-        fileList.querySelectorAll('li').forEach(li => {
+        fileList.querySelectorAll('.file-item').forEach(li => {
             const label = li.querySelector('.file-label');
-            if (label && label.textContent === currentFileName) {
+            if (label && label.getAttribute('title') === currentFileName) {
                 li.classList.add('active');
             } else {
                 li.classList.remove('active');
@@ -309,6 +402,49 @@
         autoSaveTimer = setTimeout(() => {
             saveCurrentFile();
         }, AUTOSAVE_DELAY);
+    }
+
+    // ── Auto-Renumber Ordered Lists ──────────────────
+    function renumberOrderedLists(text) {
+        const lines = text.split('\n');
+        let inList = false;
+        let counters = {};
+        let changed = false;
+
+        for (let i = 0; i < lines.length; i++) {
+            const match = lines[i].match(/^(\s*)(\d+)(\.)\s/);
+            if (match) {
+                const indent = match[1];
+                const oldNum = parseInt(match[2], 10);
+
+                if (!inList) {
+                    counters = {};
+                    inList = true;
+                }
+
+                if (counters[indent] === undefined) {
+                    counters[indent] = 0;
+                }
+
+                counters[indent] = counters[indent] + 1;
+                const newNum = counters[indent];
+
+                if (oldNum !== newNum) {
+                    lines[i] = indent + newNum + lines[i].substring(indent.length + match[2].length);
+                    changed = true;
+                }
+            } else {
+                const isBlank = lines[i].trim() === '';
+                const isIndentedContent = /^\s+\S/.test(lines[i]) && !/^\s*-\s/.test(lines[i]);
+
+                if (!isBlank && !isIndentedContent) {
+                    inList = false;
+                    counters = {};
+                }
+            }
+        }
+
+        return changed ? lines.join('\n') : null;
     }
 
     // ── Toolbar Formatting ─────────────────────────────
@@ -452,10 +588,94 @@
             e.preventDefault();
             const start = editor.selectionStart;
             const end = editor.selectionEnd;
-            editor.value = editor.value.substring(0, start) + '  ' + editor.value.substring(end);
-            editor.selectionStart = editor.selectionEnd = start + 2;
+            const text = editor.value;
+
+            const lineStart = text.lastIndexOf('\n', start - 1) + 1;
+            const lineEnd = text.indexOf('\n', start);
+            const lineEndActual = lineEnd === -1 ? text.length : lineEnd;
+            const currentLine = text.substring(lineStart, lineEndActual);
+
+            const isListLine = /^\s*(\d+\.\s|- )/.test(currentLine);
+
+            if (e.shiftKey) {
+                // Shift+Tab: remove até 2 espaços do início da linha
+                const spacesToRemove = currentLine.match(/^( {1,2})/);
+                if (spacesToRemove) {
+                    const removeCount = spacesToRemove[1].length;
+                    editor.value = text.substring(0, lineStart) + currentLine.substring(removeCount) + text.substring(lineEndActual);
+                    editor.selectionStart = editor.selectionEnd = Math.max(lineStart, start - removeCount);
+                    updatePreview();
+                    scheduleAutoSave();
+                }
+            } else if (isListLine) {
+                // Tab em linha de lista: indentar no início da linha
+                editor.value = text.substring(0, lineStart) + '  ' + text.substring(lineStart);
+                editor.selectionStart = editor.selectionEnd = start + 2;
+                updatePreview();
+                scheduleAutoSave();
+            } else {
+                // Tab normal: inserir 2 espaços na posição do cursor
+                editor.value = text.substring(0, start) + '  ' + text.substring(end);
+                editor.selectionStart = editor.selectionEnd = start + 2;
+                updatePreview();
+                scheduleAutoSave();
+            }
+        }
+    });
+
+    // ── List Auto-Continue on Enter ──────────────────
+    editor.addEventListener('keydown', (e) => {
+        if (e.key !== 'Enter') return;
+
+        const start = editor.selectionStart;
+        const text = editor.value;
+
+        // Encontrar a linha atual
+        const lineStart = text.lastIndexOf('\n', start - 1) + 1;
+        const currentLine = text.substring(lineStart, start);
+
+        // Verificar lista ordenada: espaços opcionais + número + ". " + conteúdo
+        const olMatch = currentLine.match(/^(\s*)(\d+)\.\s(.*)$/);
+        // Verificar lista não-ordenada: espaços opcionais + "- " + conteúdo
+        const ulMatch = currentLine.match(/^(\s*)-\s(.*)$/);
+
+        if (olMatch) {
+            e.preventDefault();
+            const [, indent, numStr, content] = olMatch;
+            if (content.trim() === '') {
+                // Item vazio — remover prefixo (parar a lista)
+                const prefixLen = indent.length + numStr.length + 2;
+                editor.value = text.substring(0, lineStart) + text.substring(lineStart + prefixLen);
+                editor.selectionStart = editor.selectionEnd = lineStart;
+            } else {
+                // Continuar numeração
+                const nextNum = parseInt(numStr, 10) + 1;
+                const insertion = `\n${indent}${nextNum}. `;
+                editor.value = text.substring(0, start) + insertion + text.substring(start);
+                editor.selectionStart = editor.selectionEnd = start + insertion.length;
+            }
             updatePreview();
             scheduleAutoSave();
+            return;
+        }
+
+        if (ulMatch) {
+            e.preventDefault();
+            const [, indent, content] = ulMatch;
+            if (content.trim() === '') {
+                // Item vazio — remover prefixo (parar a lista)
+                const prefixLen = indent.length + 2;
+                editor.value = text.substring(0, lineStart) + text.substring(lineStart + prefixLen);
+                editor.selectionStart = editor.selectionEnd = lineStart;
+            } else {
+                // Continuar com dash
+                const insertion = `\n${indent}- `;
+                editor.value = text.substring(0, start) + insertion + text.substring(start);
+                editor.selectionStart = editor.selectionEnd = start + insertion.length;
+            }
+            updatePreview();
+            scheduleAutoSave();
+            return;
         }
     });
 
@@ -467,6 +687,15 @@
 
     // Editor input
     editor.addEventListener('input', () => {
+        // Renumerar listas ordenadas automaticamente
+        const renumbered = renumberOrderedLists(editor.value);
+        if (renumbered !== null) {
+            const pos = editor.selectionStart;
+            const oldLen = editor.value.length;
+            editor.value = renumbered;
+            const diff = renumbered.length - oldLen;
+            editor.selectionStart = editor.selectionEnd = Math.max(0, pos + diff);
+        }
         updatePreview();
         scheduleAutoSave();
     });
