@@ -1047,3 +1047,131 @@ body {
 .hidden {
     display: none !important;
 }
+
+/* ===== WIKILINKS ===== */
+.wikilink {
+    color: var(--accent);
+    text-decoration: none;
+    background: var(--accent-glow);
+    border-radius: 3px;
+    padding: 1px 4px;
+    cursor: pointer;
+    transition: background var(--transition), color var(--transition);
+}
+
+.wikilink:hover {
+    color: var(--accent-hover);
+    background: rgba(88, 166, 255, 0.22);
+    text-decoration: none;
+}
+
+.wikilink-missing {
+    color: var(--warning);
+    background: rgba(210, 153, 34, 0.12);
+    border-bottom: 1px dashed var(--warning);
+}
+
+.wikilink-missing:hover {
+    background: rgba(210, 153, 34, 0.22);
+    text-decoration: none;
+}
+
+/* ===== BACKLINKS PANEL ===== */
+#file-list-container {
+    min-height: 60px;
+}
+
+#backlinks-panel {
+    border-top: 1px solid var(--border);
+    flex-shrink: 0;
+    max-height: 220px;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.backlinks-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 16px 6px;
+    flex-shrink: 0;
+}
+
+.backlinks-count {
+    font-size: 11px;
+    color: var(--text-muted);
+    background: var(--bg-tertiary);
+    border-radius: 10px;
+    padding: 1px 7px;
+    font-weight: 500;
+    min-width: 20px;
+    text-align: center;
+}
+
+.backlinks-list {
+    list-style: none;
+    overflow-y: auto;
+    flex: 1;
+    padding-bottom: 6px;
+}
+
+.backlink-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 16px;
+    cursor: pointer;
+    font-size: 12px;
+    color: var(--text-secondary);
+    transition: all var(--transition);
+}
+
+.backlink-item:hover {
+    color: var(--text-primary);
+    background: var(--bg-hover);
+}
+
+.backlink-icon {
+    font-size: 12px;
+    flex-shrink: 0;
+}
+
+.backlink-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.backlink-empty {
+    color: var(--text-muted) !important;
+    font-style: italic;
+    font-size: 12px;
+    padding: 8px 16px !important;
+    cursor: default !important;
+    background: transparent !important;
+    border: none !important;
+}
+
+/* ===== INLINE RENAME ===== */
+.rename-input {
+    flex: 1;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    border: 1px solid var(--accent);
+    border-radius: 3px;
+    padding: 1px 5px;
+    font-family: var(--font-ui);
+    font-size: 13px;
+    outline: none;
+    box-shadow: 0 0 0 2px var(--accent-glow);
+    min-width: 0;
+}
+
+.file-item.renaming {
+    pointer-events: none;
+}
+
+.file-item.renaming .rename-input {
+    pointer-events: all;
+}
