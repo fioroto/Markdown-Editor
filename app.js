@@ -11,6 +11,11 @@
     let autoSaveTimer = null;
     const AUTOSAVE_DELAY = 2000;
 
+    // ── Wikilink / Backlink State ──────────────────────
+    let fileHandleMap = {};        // { "path/note.md": FileSystemFileHandle }
+    let backlinkIndex = {};        // { "Note Title": ["path/a.md", "path/b.md"] }
+    let allFileTitles = new Set(); // all note titles (filename without .md)
+
     // ── DOM Elements ───────────────────────────────────
     const $ = (sel) => document.querySelector(sel);
     const welcomeScreen = $('#welcome-screen');
@@ -83,6 +88,57 @@
         }
     });
 
+    // ── Wikilink Helpers ───────────────────────────────
+
+    function escapeHtml(str) {
+        return str
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;');
+    }
+
+    function escapeRegex(str) {
+        return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    }
+
+    function extractWikilinks(content) {
+        const re = /\[\[([^\]|]+)(?:\|[^\]]+)?\]\]/g;
+        const links = new Set();
+        let m;
+        while ((m = re.exec(content)) !== null) {
+            links.add(m[1].trim());
+        }
+        return links;
+    }
+
+    // ── Wikilink Marked Extension ─────────────────────
+    marked.use({
+        extensions: [{
+            name: 'wikilink',
+            level: 'inline',
+            start(src) { return src.indexOf('[['); },
+            tokenizer(src) {
+                const match = src.match(/^\[\[([^\]|]+?)(?:\|([^\]]+?))?\]\]/);
+                if (match) {
+                    return {
+                        type: 'wikilink',
+                        raw: match[0],
+                        target: match[1].trim(),
+                        display: match[2] ? match[2].trim() : match[1].trim()
+                    };
+                }
+            },
+            renderer(token) {
+                const exists = allFileTitles.has(token.target);
+                const cls = exists ? 'wikilink' : 'wikilink wikilink-missing';
+                const label = escapeHtml(token.display);
+                const target = escapeHtml(token.target);
+                return `<a class="${cls}" data-wikilink="${target}" href="#">${label}</a>`;
+            }
+        }]
+    });
+
     // ── File System Access API ─────────────────────────
 
     async function openDirectory() {
@@ -102,6 +158,8 @@
         if (!dirHandle) return;
         const tree = await scanDirectory(dirHandle, '');
         renderFileTree(tree);
+        await buildBacklinkIndex(tree);
+        updateBacklinksPanel();
     }
 
     async function scanDirectory(handle, path) {
@@ -209,13 +267,18 @@
             `;
 
             li.addEventListener('click', (e) => {
-                if (e.target.closest('.file-delete')) return;
+                if (e.target.closest('.file-delete') || li.classList.contains('renaming')) return;
                 openFileByPath(fileEntry.path, fileEntry.handle);
             });
 
             li.querySelector('.file-delete').addEventListener('click', (e) => {
                 e.stopPropagation();
                 promptDeleteFile(fileEntry.path);
+            });
+
+            li.querySelector('.file-label').addEventListener('dblclick', (e) => {
+                e.stopPropagation();
+                startInlineRename(li, fileEntry);
             });
 
             container.appendChild(li);
@@ -240,6 +303,9 @@
             updateFileName();
             setStatus('saved');
             highlightActiveFile();
+            updateBacklinksPanel();
+            const bp = $('#backlinks-panel');
+            if (bp) bp.classList.remove('hidden');
         } catch (err) {
             console.error('Erro ao abrir arquivo:', err);
         }
@@ -263,6 +329,8 @@
             await writable.close();
             isDirty = false;
             setStatus('saved');
+            updateBacklinkIndexForCurrentFile();
+            updateBacklinksPanel();
         } catch (err) {
             console.error('Erro ao salvar:', err);
             setStatus('unsaved');
@@ -315,6 +383,16 @@
 
             await parentHandle.removeEntry(fileName);
 
+            // Clean up index structures
+            const deletedTitle = fileName.replace(/\.md$/i, '');
+            delete fileHandleMap[path];
+            allFileTitles.delete(deletedTitle);
+            for (const key of Object.keys(backlinkIndex)) {
+                backlinkIndex[key] = backlinkIndex[key].filter(p => p !== path);
+                if (backlinkIndex[key].length === 0) delete backlinkIndex[key];
+            }
+            delete backlinkIndex[deletedTitle];
+
             if (path === currentFileName) {
                 currentFileHandle = null;
                 currentFileName = '';
@@ -322,11 +400,206 @@
                 updatePreview();
                 updateFileName();
                 setStatus('saved');
+                const bp = $('#backlinks-panel');
+                if (bp) bp.classList.add('hidden');
             }
             await refreshFileList();
         } catch (err) {
             console.error('Erro ao deletar:', err);
             alert('Não foi possível deletar o arquivo.');
+        }
+    }
+
+    // ── Backlink Index ─────────────────────────────────
+
+    async function buildBacklinkIndex(tree) {
+        fileHandleMap = {};
+        backlinkIndex = {};
+        allFileTitles = new Set();
+
+        // Pass 1: collect all titles and handles
+        function collectTitlesAndHandles(subtree) {
+            for (const f of subtree.files) {
+                fileHandleMap[f.path] = f.handle;
+                allFileTitles.add(f.name.replace(/\.md$/i, ''));
+            }
+            for (const folder of subtree.folders) {
+                collectTitlesAndHandles(folder.children);
+            }
+        }
+        collectTitlesAndHandles(tree);
+
+        // Pass 2: read content and build backlink index
+        async function indexContent(subtree) {
+            for (const f of subtree.files) {
+                try {
+                    const file = await f.handle.getFile();
+                    const content = await file.text();
+                    for (const targetTitle of extractWikilinks(content)) {
+                        if (!backlinkIndex[targetTitle]) backlinkIndex[targetTitle] = [];
+                        backlinkIndex[targetTitle].push(f.path);
+                    }
+                } catch (_) { /* skip unreadable */ }
+            }
+            for (const folder of subtree.folders) {
+                await indexContent(folder.children);
+            }
+        }
+        await indexContent(tree);
+    }
+
+    function updateBacklinkIndexForCurrentFile() {
+        if (!currentFileName) return;
+        // Remove current file from all backlink lists
+        for (const key of Object.keys(backlinkIndex)) {
+            backlinkIndex[key] = backlinkIndex[key].filter(p => p !== currentFileName);
+            if (backlinkIndex[key].length === 0) delete backlinkIndex[key];
+        }
+        // Re-add based on current editor content
+        for (const targetTitle of extractWikilinks(editor.value)) {
+            if (!backlinkIndex[targetTitle]) backlinkIndex[targetTitle] = [];
+            backlinkIndex[targetTitle].push(currentFileName);
+        }
+    }
+
+    function updateBacklinksPanel() {
+        const panel = $('#backlinks-panel');
+        if (!panel) return;
+        if (!currentFileName) return;
+
+        const title = currentFileName.split('/').pop().replace(/\.md$/i, '');
+        const linkedPaths = backlinkIndex[title] || [];
+        const linkedList = $('#backlinks-linked-list');
+        const countEl = $('#backlinks-linked-count');
+
+        if (countEl) countEl.textContent = linkedPaths.length;
+        if (!linkedList) return;
+        linkedList.innerHTML = '';
+
+        if (linkedPaths.length === 0) {
+            const li = document.createElement('li');
+            li.className = 'backlink-empty';
+            li.textContent = 'Nenhuma nota aponta para cá';
+            linkedList.appendChild(li);
+        } else {
+            linkedPaths.forEach(path => {
+                const li = document.createElement('li');
+                li.className = 'backlink-item';
+                const name = path.split('/').pop().replace(/\.md$/i, '');
+                li.innerHTML = `<span class="backlink-icon">📄</span><span class="backlink-name">${escapeHtml(name)}</span>`;
+                li.title = path;
+                li.addEventListener('click', () => {
+                    const handle = fileHandleMap[path];
+                    if (handle) openFileByPath(path, handle);
+                });
+                linkedList.appendChild(li);
+            });
+        }
+    }
+
+    // ── Rename File ────────────────────────────────────
+
+    function startInlineRename(li, fileEntry) {
+        if (li.classList.contains('renaming')) return;
+        li.classList.add('renaming');
+        const labelSpan = li.querySelector('.file-label');
+        const oldDisplayName = fileEntry.name.replace(/\.md$/i, '');
+
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.value = oldDisplayName;
+        input.className = 'rename-input';
+        labelSpan.replaceWith(input);
+        input.focus();
+        input.select();
+
+        let committed = false;
+        const commit = async () => {
+            if (committed) return;
+            committed = true;
+            const newName = input.value.trim();
+            li.classList.remove('renaming');
+            if (newName && newName !== oldDisplayName) {
+                await renameFile(fileEntry, newName + '.md');
+            } else {
+                await refreshFileList();
+            }
+        };
+
+        input.addEventListener('blur', commit);
+        input.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') { e.preventDefault(); commit(); }
+            if (e.key === 'Escape') {
+                committed = true;
+                li.classList.remove('renaming');
+                refreshFileList();
+            }
+        });
+    }
+
+    async function renameFile(fileEntry, newName) {
+        if (!dirHandle) return;
+        const parts = fileEntry.path.split('/');
+        const oldFileName = parts.pop();
+        let parentHandle = dirHandle;
+
+        for (const part of parts) {
+            parentHandle = await parentHandle.getDirectoryHandle(part);
+        }
+
+        try {
+            const oldFile = await fileEntry.handle.getFile();
+            const content = await oldFile.text();
+
+            const newHandle = await parentHandle.getFileHandle(newName, { create: true });
+            const writable = await newHandle.createWritable();
+            await writable.write(content);
+            await writable.close();
+
+            await parentHandle.removeEntry(oldFileName);
+
+            const oldTitle = oldFileName.replace(/\.md$/i, '');
+            const newTitle = newName.replace(/\.md$/i, '');
+            await updateWikilinkReferences(oldTitle, newTitle);
+
+            const newPath = parts.length > 0 ? parts.join('/') + '/' + newName : newName;
+            if (fileEntry.path === currentFileName) {
+                currentFileName = newPath;
+                currentFileHandle = newHandle;
+                updateFileName();
+            }
+
+            await refreshFileList();
+        } catch (err) {
+            console.error('Erro ao renomear:', err);
+            alert('Não foi possível renomear o arquivo.');
+            await refreshFileList();
+        }
+    }
+
+    async function updateWikilinkReferences(oldTitle, newTitle) {
+        const re = new RegExp(
+            '\\[\\[' + escapeRegex(oldTitle) + '(\\|[^\\]]*)?\\]\\]',
+            'gi'
+        );
+
+        for (const [path, handle] of Object.entries(fileHandleMap)) {
+            try {
+                const file = await handle.getFile();
+                const content = await file.text();
+                if (!re.test(content)) continue;
+                re.lastIndex = 0;
+                const updated = content.replace(re, (match, alias) => {
+                    return alias ? `[[${newTitle}${alias}]]` : `[[${newTitle}]]`;
+                });
+                const writable = await handle.createWritable();
+                await writable.write(updated);
+                await writable.close();
+                if (path === currentFileName) {
+                    editor.value = updated;
+                    updatePreview();
+                }
+            } catch (_) { /* skip */ }
         }
     }
 
@@ -510,6 +783,10 @@
             case 'table':
                 replacement = `\n| Coluna 1 | Coluna 2 | Coluna 3 |\n|----------|----------|----------|\n| célula   | célula   | célula   |\n`;
                 cursorOffset = replacement.length;
+                break;
+            case 'wikilink':
+                replacement = `[[${sel || 'Nome da Nota'}]]`;
+                cursorOffset = sel ? replacement.length : 2;
                 break;
             default:
                 return;
@@ -698,6 +975,32 @@
         }
         updatePreview();
         scheduleAutoSave();
+    });
+
+    // Wikilink navigation in preview
+    preview.addEventListener('click', (e) => {
+        const link = e.target.closest('[data-wikilink]');
+        if (!link) return;
+        e.preventDefault();
+        const target = link.getAttribute('data-wikilink');
+        if (!target) return;
+        const handle = fileHandleMap[target] || null;
+        if (handle) {
+            openFileByPath(target, handle);
+            return;
+        }
+        // Try searching by title match
+        for (const [path, h] of Object.entries(fileHandleMap)) {
+            const name = path.split('/').pop().replace(/\.md$/i, '');
+            if (name === target) {
+                openFileByPath(path, h);
+                return;
+            }
+        }
+        // Target doesn't exist — offer to create
+        if (confirm(`"${target}" não existe. Criar este arquivo?`)) {
+            createFile(target + '.md');
+        }
     });
 
     // Toolbar buttons
