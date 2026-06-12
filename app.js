@@ -1314,23 +1314,31 @@
 <body>
   ${bodyContent}
   <script>
-    mermaid.initialize({ startOnLoad: false, theme: 'default', securityLevel: 'loose', htmlLabels: true, flowchart: { htmlLabels: true } });
-    // Os diagramas ja foram normalizados (setas, \n, negrito) na geracao do
-    // HTML. Aqui so renderizamos SEQUENCIALMENTE (o Mermaid usa estado interno
-    // compartilhado e falha com varios render() simultaneos).
-    (async () => {
+    // Renderiza so depois que TODOS os recursos (Mermaid/hljs via CDN)
+    // carregarem — caso contrario o script pode rodar antes do Mermaid existir.
+    window.addEventListener('load', async () => {
       const blocks = document.querySelectorAll('.mermaid-block');
-      for (let i = 0; i < blocks.length; i++) {
-        const block = blocks[i];
-        try {
-          const { svg } = await mermaid.render('mm-export-' + i, block.textContent);
-          block.innerHTML = svg;
-        } catch (e) {
-          block.innerHTML = '<pre class="mermaid-error">⚠ ' + (e && e.message ? e.message : e) + '</pre>';
+      if (typeof mermaid === 'undefined') {
+        blocks.forEach((b) => { b.innerHTML = '<pre class="mermaid-error">⚠ Mermaid nao carregou (sem conexao com o CDN?)</pre>'; });
+      } else {
+        mermaid.initialize({ startOnLoad: false, theme: 'default', securityLevel: 'loose', htmlLabels: true, flowchart: { htmlLabels: true } });
+        // Os diagramas ja foram normalizados (setas, \n, negrito) na geracao do
+        // HTML. Renderizamos SEQUENCIALMENTE (o Mermaid usa estado interno
+        // compartilhado e falha com varios render() simultaneos).
+        for (let i = 0; i < blocks.length; i++) {
+          const block = blocks[i];
+          try {
+            const { svg } = await mermaid.render('mm-export-' + i, block.textContent);
+            block.innerHTML = svg;
+          } catch (e) {
+            block.innerHTML = '<pre class="mermaid-error">⚠ ' + (e && e.message ? e.message : e) + '</pre>';
+          }
         }
       }
-      document.querySelectorAll('pre code').forEach(b => hljs.highlightElement(b));
-    })();
+      if (typeof hljs !== 'undefined') {
+        document.querySelectorAll('pre code').forEach((b) => hljs.highlightElement(b));
+      }
+    });
   <\/script>
 </body>
 </html>`;
@@ -1353,12 +1361,19 @@
     async function previewHtml() {
         const bodyContent = await renderBodyWithImages(true);
         const fullHtml = generateFullHtml(bodyContent);
-        const win = window.open('', '_blank');
-        if (win) {
-            win.document.open();
-            win.document.write(fullHtml);
-            win.document.close();
+        // Abre como Blob URL (carregamento de pagina normal) em vez de
+        // document.write — assim os scripts do CDN (Mermaid/hljs) carregam de
+        // forma confiavel e na ordem correta, igual ao preview do app.
+        const blob = new Blob([fullHtml], { type: 'text/html;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const win = window.open(url, '_blank');
+        if (!win) {
+            // Pop-up bloqueado: cai para download do HTML.
+            URL.revokeObjectURL(url);
+            return exportHtml();
         }
+        // Revoga depois para nao quebrar o carregamento da nova aba.
+        setTimeout(() => URL.revokeObjectURL(url), 60000);
     }
 
     // Export / Preview buttons
