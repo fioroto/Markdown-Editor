@@ -57,6 +57,9 @@
         mermaid.initialize({
             startOnLoad: false,
             theme: 'dark',
+            securityLevel: 'loose',
+            htmlLabels: true,
+            flowchart: { htmlLabels: true },
             themeVariables: {
                 darkMode: true,
                 background: '#161b22',
@@ -765,12 +768,21 @@
         return tmp.innerHTML;
     }
 
+    // Mermaid não interpreta markdown nos rótulos. Convertendo **negrito**
+    // (e *itálico*) para as tags HTML correspondentes, que o Mermaid renderiza
+    // quando htmlLabels/securityLevel:'loose' estão ativos.
+    function preprocessMermaid(def) {
+        return def
+            .replace(/\*\*([^*\n]+?)\*\*/g, '<b>$1</b>')
+            .replace(/(^|[^*])\*([^*\n]+?)\*(?!\*)/g, '$1<i>$2</i>');
+    }
+
     async function renderMermaidBlocks(container) {
         if (typeof mermaid === 'undefined') return;
         const blocks = container.querySelectorAll('.mermaid-block');
         for (const block of blocks) {
             const id = block.getAttribute('data-mermaid-id') || `mm-${Date.now()}`;
-            const definition = block.textContent;
+            const definition = preprocessMermaid(block.textContent);
             try {
                 const { svg } = await mermaid.render(id, definition);
                 block.innerHTML = svg;
@@ -1233,9 +1245,9 @@
       font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
       background: #ffffff;
       color: #1f2328;
-      padding: 40px;
-      max-width: 900px;
-      margin: 0 auto;
+      padding: 24px 32px;
+      max-width: none;
+      margin: 0;
       line-height: 1.7;
       font-size: 15px;
       -webkit-font-smoothing: antialiased;
@@ -1278,10 +1290,13 @@
 <body>
   ${bodyContent}
   <script>
-    mermaid.initialize({ startOnLoad: false, theme: 'default' });
+    mermaid.initialize({ startOnLoad: false, theme: 'default', securityLevel: 'loose', htmlLabels: true, flowchart: { htmlLabels: true } });
+    const mdToHtml = (s) => s
+      .replace(/\*\*([^*\n]+?)\*\*/g, '<b>$1<\/b>')
+      .replace(/(^|[^*])\*([^*\n]+?)\*(?!\*)/g, '$1<i>$2<\/i>');
     document.querySelectorAll('.mermaid-block').forEach(async (block, i) => {
       const id = 'mm-export-' + i;
-      const definition = block.textContent;
+      const definition = mdToHtml(block.textContent);
       try {
         const { svg } = await mermaid.render(id, definition);
         block.innerHTML = svg;
