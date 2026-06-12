@@ -765,6 +765,12 @@
         const tmp = document.createElement('div');
         tmp.innerHTML = marked.parse(editor.value || '');
         await resolveImages(tmp, useDataUrl);
+        // Pré-normaliza os diagramas Mermaid aqui (contexto real do app), para
+        // que o HTML exportado não precise reprocessar com regex — evita bugs
+        // de escape ao injetar regex dentro da template string do HTML.
+        tmp.querySelectorAll('.mermaid-block').forEach((block) => {
+            block.textContent = preprocessMermaid(block.textContent);
+        });
         return tmp.innerHTML;
     }
 
@@ -1309,32 +1315,15 @@
   ${bodyContent}
   <script>
     mermaid.initialize({ startOnLoad: false, theme: 'default', securityLevel: 'loose', htmlLabels: true, flowchart: { htmlLabels: true } });
-    function normalizeArrows(def) {
-      const ARROWS = '→⟶⇒➜➔';
-      let out = '', depth = 0;
-      for (let i = 0; i < def.length; i++) {
-        const ch = def[i];
-        if (ch === '[' || ch === '(' || ch === '{') depth++;
-        else if (ch === ']' || ch === ')' || ch === '}') depth = Math.max(0, depth - 1);
-        if (depth === 0 && ARROWS.indexOf(ch) !== -1) { out += '-->'; continue; }
-        out += ch;
-      }
-      return out;
-    }
-    const prep = (s) => normalizeArrows(s)
-      .replace(/\\n/g, '<br/>')
-      .replace(/\*\*([^*\n]+?)\*\*/g, '<b>$1<\/b>')
-      .replace(/(^|[^*])\*([^*\n]+?)\*(?!\*)/g, '$1<i>$2<\/i>');
-    // Renderiza os diagramas SEQUENCIALMENTE: o Mermaid usa estado interno
-    // compartilhado e falha quando varios render() rodam ao mesmo tempo.
+    // Os diagramas ja foram normalizados (setas, \n, negrito) na geracao do
+    // HTML. Aqui so renderizamos SEQUENCIALMENTE (o Mermaid usa estado interno
+    // compartilhado e falha com varios render() simultaneos).
     (async () => {
       const blocks = document.querySelectorAll('.mermaid-block');
       for (let i = 0; i < blocks.length; i++) {
         const block = blocks[i];
-        const id = 'mm-export-' + i;
-        const definition = prep(block.textContent);
         try {
-          const { svg } = await mermaid.render(id, definition);
+          const { svg } = await mermaid.render('mm-export-' + i, block.textContent);
           block.innerHTML = svg;
         } catch (e) {
           block.innerHTML = '<pre class="mermaid-error">⚠ ' + (e && e.message ? e.message : e) + '</pre>';
