@@ -53,23 +53,33 @@
     const btnPreviewHtml = $('#btn-preview-html');
 
     // ── Mermaid Setup ──────────────────────────────────
+    // Config escura para o preview do app (fundo escuro).
+    const MERMAID_DARK_CONFIG = {
+        startOnLoad: false,
+        theme: 'dark',
+        securityLevel: 'loose',
+        htmlLabels: true,
+        flowchart: { htmlLabels: true },
+        themeVariables: {
+            darkMode: true,
+            background: '#161b22',
+            primaryColor: '#1f6feb',
+            primaryTextColor: '#e6edf3',
+            lineColor: '#58a6ff',
+            secondaryColor: '#21262d',
+            tertiaryColor: '#30363d'
+        }
+    };
+    // Config clara para o HTML exportado (fundo branco).
+    const MERMAID_LIGHT_CONFIG = {
+        startOnLoad: false,
+        theme: 'default',
+        securityLevel: 'loose',
+        htmlLabels: true,
+        flowchart: { htmlLabels: true }
+    };
     if (typeof mermaid !== 'undefined') {
-        mermaid.initialize({
-            startOnLoad: false,
-            theme: 'dark',
-            securityLevel: 'loose',
-            htmlLabels: true,
-            flowchart: { htmlLabels: true },
-            themeVariables: {
-                darkMode: true,
-                background: '#161b22',
-                primaryColor: '#1f6feb',
-                primaryTextColor: '#e6edf3',
-                lineColor: '#58a6ff',
-                secondaryColor: '#21262d',
-                tertiaryColor: '#30363d'
-            }
-        });
+        mermaid.initialize(MERMAID_DARK_CONFIG);
     }
 
     let mermaidIdCounter = 0;
@@ -765,12 +775,27 @@
         const tmp = document.createElement('div');
         tmp.innerHTML = marked.parse(editor.value || '');
         await resolveImages(tmp, useDataUrl);
-        // Pré-normaliza os diagramas Mermaid aqui (contexto real do app), para
-        // que o HTML exportado não precise reprocessar com regex — evita bugs
-        // de escape ao injetar regex dentro da template string do HTML.
-        tmp.querySelectorAll('.mermaid-block').forEach((block) => {
-            block.textContent = preprocessMermaid(block.textContent);
-        });
+        // Renderiza os diagramas Mermaid AQUI (o mermaid.js já está carregado e
+        // funcionando no app) e embute o SVG pronto. Assim o HTML exportado é
+        // 100% estático — não depende do mermaid.js carregar na nova aba.
+        const blocks = tmp.querySelectorAll('.mermaid-block');
+        if (blocks.length && typeof mermaid !== 'undefined') {
+            // Tema claro para combinar com o fundo branco do HTML exportado.
+            mermaid.initialize(MERMAID_LIGHT_CONFIG);
+            for (let i = 0; i < blocks.length; i++) {
+                const block = blocks[i];
+                const def = preprocessMermaid(block.textContent);
+                try {
+                    const { svg } = await mermaid.render(`mmx-${Date.now()}-${i}`, def);
+                    block.innerHTML = svg;
+                    block.classList.add('rendered');
+                } catch (e) {
+                    block.innerHTML = `<pre class="mermaid-error">⚠ ${e && e.message ? e.message : e}</pre>`;
+                }
+            }
+            // Restaura o tema escuro do preview do app.
+            mermaid.initialize(MERMAID_DARK_CONFIG);
+        }
         return tmp.innerHTML;
     }
 
@@ -1261,8 +1286,6 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css">
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"><\/script>
-  <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"><\/script>
   <style>
     *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
     body {
@@ -1313,33 +1336,6 @@
 </head>
 <body>
   ${bodyContent}
-  <script>
-    // Renderiza so depois que TODOS os recursos (Mermaid/hljs via CDN)
-    // carregarem — caso contrario o script pode rodar antes do Mermaid existir.
-    window.addEventListener('load', async () => {
-      const blocks = document.querySelectorAll('.mermaid-block');
-      if (typeof mermaid === 'undefined') {
-        blocks.forEach((b) => { b.innerHTML = '<pre class="mermaid-error">⚠ Mermaid nao carregou (sem conexao com o CDN?)</pre>'; });
-      } else {
-        mermaid.initialize({ startOnLoad: false, theme: 'default', securityLevel: 'loose', htmlLabels: true, flowchart: { htmlLabels: true } });
-        // Os diagramas ja foram normalizados (setas, \n, negrito) na geracao do
-        // HTML. Renderizamos SEQUENCIALMENTE (o Mermaid usa estado interno
-        // compartilhado e falha com varios render() simultaneos).
-        for (let i = 0; i < blocks.length; i++) {
-          const block = blocks[i];
-          try {
-            const { svg } = await mermaid.render('mm-export-' + i, block.textContent);
-            block.innerHTML = svg;
-          } catch (e) {
-            block.innerHTML = '<pre class="mermaid-error">⚠ ' + (e && e.message ? e.message : e) + '</pre>';
-          }
-        }
-      }
-      if (typeof hljs !== 'undefined') {
-        document.querySelectorAll('pre code').forEach((b) => hljs.highlightElement(b));
-      }
-    });
-  <\/script>
 </body>
 </html>`;
     }
