@@ -896,6 +896,17 @@ body {
     margin: 8px 0;
 }
 
+.markdown-body img[data-img-missing] {
+    display: inline-block;
+    min-width: 120px;
+    padding: 8px 12px;
+    border: 1px dashed var(--border, #30363d);
+    border-radius: var(--radius-md);
+    color: var(--text-muted, #8b949e);
+    font-size: 12px;
+    font-style: italic;
+}
+
 .markdown-body input[type="checkbox"] {
     margin-right: 6px;
     accent-color: var(--accent);
