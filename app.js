@@ -1245,9 +1245,9 @@
       font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
       background: #ffffff;
       color: #1f2328;
-      padding: 32px 24px;
-      max-width: 1280px;
-      margin: 0 auto;
+      padding: 24px 32px;
+      max-width: none;
+      margin: 0;
       line-height: 1.7;
       font-size: 15px;
       -webkit-font-smoothing: antialiased;
