@@ -768,11 +768,29 @@
         return tmp.innerHTML;
     }
 
-    // Mermaid não interpreta markdown nos rótulos. Convertendo **negrito**
-    // (e *itálico*) para as tags HTML correspondentes, que o Mermaid renderiza
-    // quando htmlLabels/securityLevel:'loose' estão ativos.
+    // Troca setas unicode (→ ⟶ ⇒ ➜ ➔) usadas como CONEXÃO por '-->'. Só
+    // converte fora dos rótulos (colchetes/parênteses/chaves); dentro deles a
+    // seta é texto legítimo e deve ser preservada.
+    function normalizeMermaidArrows(def) {
+        const ARROWS = '→⟶⇒➜➔';
+        let out = '';
+        let depth = 0;
+        for (let i = 0; i < def.length; i++) {
+            const ch = def[i];
+            if (ch === '[' || ch === '(' || ch === '{') depth++;
+            else if (ch === ']' || ch === ')' || ch === '}') depth = Math.max(0, depth - 1);
+            if (depth === 0 && ARROWS.indexOf(ch) !== -1) { out += '-->'; continue; }
+            out += ch;
+        }
+        return out;
+    }
+
+    // Mermaid não interpreta markdown nem '\n' nos rótulos. Convertendo setas
+    // de conexão, quebras de linha literais e **negrito**/*itálico* para o que
+    // o Mermaid entende (htmlLabels/securityLevel:'loose' ativos).
     function preprocessMermaid(def) {
-        return def
+        return normalizeMermaidArrows(def)
+            .replace(/\\n/g, '<br/>')
             .replace(/\*\*([^*\n]+?)\*\*/g, '<b>$1</b>')
             .replace(/(^|[^*])\*([^*\n]+?)\*(?!\*)/g, '$1<i>$2</i>');
     }
@@ -1291,7 +1309,20 @@
   ${bodyContent}
   <script>
     mermaid.initialize({ startOnLoad: false, theme: 'default', securityLevel: 'loose', htmlLabels: true, flowchart: { htmlLabels: true } });
-    const mdToHtml = (s) => s
+    function normalizeArrows(def) {
+      const ARROWS = '→⟶⇒➜➔';
+      let out = '', depth = 0;
+      for (let i = 0; i < def.length; i++) {
+        const ch = def[i];
+        if (ch === '[' || ch === '(' || ch === '{') depth++;
+        else if (ch === ']' || ch === ')' || ch === '}') depth = Math.max(0, depth - 1);
+        if (depth === 0 && ARROWS.indexOf(ch) !== -1) { out += '-->'; continue; }
+        out += ch;
+      }
+      return out;
+    }
+    const prep = (s) => normalizeArrows(s)
+      .replace(/\\n/g, '<br/>')
       .replace(/\*\*([^*\n]+?)\*\*/g, '<b>$1<\/b>')
       .replace(/(^|[^*])\*([^*\n]+?)\*(?!\*)/g, '$1<i>$2<\/i>');
     // Renderiza os diagramas SEQUENCIALMENTE: o Mermaid usa estado interno
@@ -1301,7 +1332,7 @@
       for (let i = 0; i < blocks.length; i++) {
         const block = blocks[i];
         const id = 'mm-export-' + i;
-        const definition = mdToHtml(block.textContent);
+        const definition = prep(block.textContent);
         try {
           const { svg } = await mermaid.render(id, definition);
           block.innerHTML = svg;
