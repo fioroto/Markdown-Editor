@@ -1294,17 +1294,23 @@
     const mdToHtml = (s) => s
       .replace(/\*\*([^*\n]+?)\*\*/g, '<b>$1<\/b>')
       .replace(/(^|[^*])\*([^*\n]+?)\*(?!\*)/g, '$1<i>$2<\/i>');
-    document.querySelectorAll('.mermaid-block').forEach(async (block, i) => {
-      const id = 'mm-export-' + i;
-      const definition = mdToHtml(block.textContent);
-      try {
-        const { svg } = await mermaid.render(id, definition);
-        block.innerHTML = svg;
-      } catch (e) {
-        block.innerHTML = '<pre class="mermaid-error">⚠ ' + e.message + '</pre>';
+    // Renderiza os diagramas SEQUENCIALMENTE: o Mermaid usa estado interno
+    // compartilhado e falha quando varios render() rodam ao mesmo tempo.
+    (async () => {
+      const blocks = document.querySelectorAll('.mermaid-block');
+      for (let i = 0; i < blocks.length; i++) {
+        const block = blocks[i];
+        const id = 'mm-export-' + i;
+        const definition = mdToHtml(block.textContent);
+        try {
+          const { svg } = await mermaid.render(id, definition);
+          block.innerHTML = svg;
+        } catch (e) {
+          block.innerHTML = '<pre class="mermaid-error">⚠ ' + (e && e.message ? e.message : e) + '</pre>';
+        }
       }
-    });
-    document.querySelectorAll('pre code').forEach(b => hljs.highlightElement(b));
+      document.querySelectorAll('pre code').forEach(b => hljs.highlightElement(b));
+    })();
   <\/script>
 </body>
 </html>`;
