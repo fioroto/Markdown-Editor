@@ -16,6 +16,11 @@
     let backlinkIndex = {};        // { "Note Title": ["path/a.md", "path/b.md"] }
     let allFileTitles = new Set(); // all note titles (filename without .md)
 
+    // ── Image State ────────────────────────────────────
+    let imageHandleMap = {};       // { "path/img.png": FileSystemFileHandle }
+    let imageObjectUrlCache = {};  // { "path/img.png": objectURL }
+    const IMAGE_EXT_RE = /\.(png|jpe?g|gif|svg|webp|bmp|avif|ico)$/i;
+
     // ── DOM Elements ───────────────────────────────────
     const $ = (sel) => document.querySelector(sel);
     const welcomeScreen = $('#welcome-screen');
@@ -139,6 +144,41 @@
         }]
     });
 
+    // ── Image Embed Marked Extension (Obsidian ![[img.png]]) ───
+    marked.use({
+        extensions: [{
+            name: 'imageEmbed',
+            level: 'inline',
+            start(src) { return src.indexOf('![['); },
+            tokenizer(src) {
+                const match = src.match(/^!\[\[([^\]|]+?)(?:\|([^\]]+?))?\]\]/);
+                if (match) {
+                    const target = match[1].trim();
+                    // Only treat as an image when it points to an image file;
+                    // otherwise let the wikilink rule handle the embed.
+                    if (!IMAGE_EXT_RE.test(target)) return;
+                    return {
+                        type: 'imageEmbed',
+                        raw: match[0],
+                        target: target,
+                        size: match[2] ? match[2].trim() : ''
+                    };
+                }
+            },
+            renderer(token) {
+                const src = escapeHtml(token.target);
+                const alt = escapeHtml(token.target.split('/').pop());
+                let dim = '';
+                const m = token.size.match(/^(\d+)(?:x(\d+))?$/);
+                if (m) {
+                    dim = ` width="${m[1]}"`;
+                    if (m[2]) dim += ` height="${m[2]}"`;
+                }
+                return `<img alt="${alt}" src="${src}"${dim}>`;
+            }
+        }]
+    });
+
     // ── File System Access API ─────────────────────────
 
     async function openDirectory() {
@@ -156,6 +196,10 @@
 
     async function refreshFileList() {
         if (!dirHandle) return;
+        // Reset image index/cache before re-scanning the folder.
+        for (const url of Object.values(imageObjectUrlCache)) URL.revokeObjectURL(url);
+        imageObjectUrlCache = {};
+        imageHandleMap = {};
         const tree = await scanDirectory(dirHandle, '');
         renderFileTree(tree);
         await buildBacklinkIndex(tree);
@@ -181,6 +225,9 @@
                     path: path ? `${path}/${name}` : name,
                     handle: entryHandle
                 });
+            } else if (entryHandle.kind === 'file' && IMAGE_EXT_RE.test(name)) {
+                const imgPath = path ? `${path}/${name}` : name;
+                imageHandleMap[imgPath] = entryHandle;
             }
         }
 
@@ -620,8 +667,102 @@
         preview.querySelectorAll('pre code').forEach((block) => {
             hljs.highlightElement(block);
         });
+        // Resolve local image references against the opened folder
+        await resolveImages(preview, false);
         // Render Mermaid diagrams
         await renderMermaidBlocks(preview);
+    }
+
+    // ── Local Image Resolution ─────────────────────────
+
+    // Resolve a relative path (e.g. "../assets/a.png") against a base directory.
+    function resolveRelativePath(baseDir, relative) {
+        const stack = baseDir ? baseDir.split('/') : [];
+        for (const part of relative.split('/')) {
+            if (part === '' || part === '.') continue;
+            if (part === '..') stack.pop();
+            else stack.push(part);
+        }
+        return stack.join('/');
+    }
+
+    // Find an indexed image file for a markdown `src`. Resolves relative to the
+    // current file's folder first, then falls back to a vault-wide filename
+    // match (Obsidian-style embeds reference images by name only).
+    function findImage(src) {
+        let path = src;
+        try { path = decodeURIComponent(src); } catch (e) { /* keep raw */ }
+        path = path.replace(/^<|>$/g, '').trim();
+
+        const baseDir = currentFileName.includes('/')
+            ? currentFileName.slice(0, currentFileName.lastIndexOf('/'))
+            : '';
+
+        const candidates = [
+            resolveRelativePath(baseDir, path),
+            path.replace(/^\.?\//, '')
+        ];
+        for (const key of candidates) {
+            if (imageHandleMap[key]) return { handle: imageHandleMap[key], key };
+        }
+
+        const base = path.split('/').pop();
+        for (const key of Object.keys(imageHandleMap)) {
+            if (key.split('/').pop() === base) return { handle: imageHandleMap[key], key };
+        }
+        return null;
+    }
+
+    function fileToDataUrl(file) {
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result);
+            reader.onerror = reject;
+            reader.readAsDataURL(file);
+        });
+    }
+
+    async function getImageObjectUrl(found) {
+        if (imageObjectUrlCache[found.key]) return imageObjectUrlCache[found.key];
+        const file = await found.handle.getFile();
+        const url = URL.createObjectURL(file);
+        imageObjectUrlCache[found.key] = url;
+        return url;
+    }
+
+    // Replace local <img> sources with usable URLs. Live preview uses object
+    // URLs (cheap); export/standalone preview uses data URLs (self-contained).
+    async function resolveImages(container, useDataUrl) {
+        const imgs = container.querySelectorAll('img');
+        for (const img of imgs) {
+            const rawSrc = img.getAttribute('src') || '';
+            if (!rawSrc || /^(https?:|data:|blob:)/i.test(rawSrc)) continue;
+            const found = findImage(rawSrc);
+            if (!found) {
+                img.setAttribute('data-img-missing', '1');
+                img.setAttribute('alt', (img.getAttribute('alt') || '') + ' (imagem não encontrada)');
+                continue;
+            }
+            try {
+                if (useDataUrl) {
+                    const file = await found.handle.getFile();
+                    img.src = await fileToDataUrl(file);
+                } else {
+                    img.src = await getImageObjectUrl(found);
+                }
+            } catch (e) {
+                img.setAttribute('data-img-missing', '1');
+            }
+        }
+    }
+
+    // Render the current document to an HTML string with local images inlined.
+    async function renderBodyWithImages(useDataUrl) {
+        mermaidIdCounter = 0;
+        const tmp = document.createElement('div');
+        tmp.innerHTML = marked.parse(editor.value || '');
+        await resolveImages(tmp, useDataUrl);
+        return tmp.innerHTML;
     }
 
     async function renderMermaidBlocks(container) {
@@ -1154,8 +1295,8 @@
 </html>`;
     }
 
-    function exportHtml() {
-        const bodyContent = marked.parse(editor.value || '');
+    async function exportHtml() {
+        const bodyContent = await renderBodyWithImages(true);
         const fullHtml = generateFullHtml(bodyContent);
         const blob = new Blob([fullHtml], { type: 'text/html;charset=utf-8' });
         const url = URL.createObjectURL(blob);
@@ -1168,9 +1309,8 @@
         URL.revokeObjectURL(url);
     }
 
-    function previewHtml() {
-        mermaidIdCounter = 0;
-        const bodyContent = marked.parse(editor.value || '');
+    async function previewHtml() {
+        const bodyContent = await renderBodyWithImages(true);
         const fullHtml = generateFullHtml(bodyContent);
         const win = window.open('', '_blank');
         if (win) {
