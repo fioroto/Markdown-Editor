@@ -4,11 +4,12 @@
  * cache primeiro.
  */
 
-const CACHE = 'md-editor-v1';
+const CACHE = 'md-editor-v2';
 const SHELL = [
     './',
     './index.html',
     './app.js',
+    './backlog.js',
     './style.css',
     './manifest.webmanifest',
     './icons/icon.svg',

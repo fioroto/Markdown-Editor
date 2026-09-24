@@ -28,6 +28,9 @@
 
     // ── Folder State ───────────────────────────────────
     let selectedFolderPath = '';   // destino de "novo arquivo" / "nova pasta"
+
+    // ── Backlog Map (backlog.js) ───────────────────────
+    let backlog = null;
     let collapsedFolders = new Set(loadJson('collapsedFolders', []));
 
     // ── DOM Elements ───────────────────────────────────
@@ -372,7 +375,8 @@
             const kv = line.match(/^([^\s:#-][^:]*):\s*(.*)$/);
             if (!kv) continue;
             let value = kv[2].trim();
-            if (/^\[.*\]$/.test(value)) {
+            // "[a, b]" é lista; "[[Nota]]" é wikilink.
+            if (/^\[.*\]$/.test(value) && !value.startsWith('[[')) {
                 value = value.slice(1, -1).split(',').map(s => unquote(s.trim())).filter(Boolean);
             } else {
                 value = unquote(value);
@@ -640,6 +644,7 @@
         await buildBacklinkIndex(tree);
         updateBacklinksPanel();
         updateMentionsPanel();
+        if (backlog) backlog.onIndexChanged();
     }
 
     async function scanDirectory(handle, path) {
@@ -845,6 +850,7 @@
             clearTimeout(autoSaveTimer);
 
             const content = await readNote(path, handle);
+            if (backlog) backlog.onFileOpened(path);
 
             currentFileHandle = handle;
             currentFileName = path;
@@ -913,6 +919,7 @@
             noteCache[path] = { modified: -1, size: -1, text: content, masked: null };
             indexLinks(path, content);
             updateBacklinksPanel();
+            if (backlog) backlog.onIndexChanged();
         } catch (err) {
             console.error('Erro ao salvar:', err);
             setStatus('unsaved');
@@ -928,7 +935,7 @@
 
     // Cria `input` (pode conter subpastas: "projetos/ideia") dentro de `baseFolder`.
     // Nunca sobrescreve: se o arquivo existe, avisa e não faz nada.
-    async function createFile(input, baseFolder = '', content = '') {
+    async function createFile(input, baseFolder = '', content = '', open = true) {
         if (!dirHandle) return null;
         let rel = input.trim().replace(/\\/g, '/');
         if (!rel) return null;
@@ -950,7 +957,7 @@
             const handle = await parent.getFileHandle(name, { create: true });
             await writeFile(handle, content);
             await refreshFileList();
-            await openFileByPath(path, fileHandleMap[path] || handle);
+            if (open) await openFileByPath(path, fileHandleMap[path] || handle);
             return path;
         } catch (err) {
             console.error('Erro ao criar arquivo:', err);
@@ -2384,15 +2391,39 @@
     btnDailyNote.addEventListener('click', openDailyNote);
     $('#btn-select-root').addEventListener('click', () => selectFolder(''));
 
+    // Pede um nome no mesmo modal e devolve o texto (ou null se cancelar).
+    let promptResolve = null;
+
+    function promptName(title, location, placeholder) {
+        if (promptResolve) promptResolve(null);
+        modalMode = 'prompt';
+        modalTitle.textContent = title;
+        modalLocation.textContent = location;
+        newFileInput.placeholder = placeholder || '';
+        newFileInput.value = '';
+        modalOverlay.classList.remove('hidden');
+        setTimeout(() => newFileInput.focus(), 100);
+        return new Promise((resolve) => { promptResolve = resolve; });
+    }
+
+    function settlePrompt(value) {
+        if (!promptResolve) return;
+        const resolve = promptResolve;
+        promptResolve = null;
+        resolve(value);
+    }
+
     modalCancel.addEventListener('click', () => {
         modalOverlay.classList.add('hidden');
+        settlePrompt(null);
     });
 
     modalCreate.addEventListener('click', () => {
         const name = newFileInput.value.trim();
         if (!name) return;
         modalOverlay.classList.add('hidden');
-        if (modalMode === 'file') createFile(name, selectedFolderPath);
+        if (modalMode === 'prompt') settlePrompt(name);
+        else if (modalMode === 'file') createFile(name, selectedFolderPath);
         else createFolder(name);
     });
 
@@ -2734,7 +2765,61 @@
         await openFileByPath(handle.name, handle);
     }
 
+    // ── Backlog Map API ────────────────────────────────
+    // Interface estreita que o backlog.js usa para ler e gravar notas.
+
+    // Grava uma nota inteira (usado para mudar o status pelo mapa).
+    async function writeNote(path, text) {
+        const handle = path === currentFileName ? currentFileHandle : fileHandleMap[path];
+        await writeFile(handle, text);
+        noteCache[path] = { modified: -1, size: -1, text, masked: null };
+        indexLinks(path, text);
+        if (path === currentFileName) {
+            clearTimeout(autoSaveTimer);
+            editor.value = text;
+            isDirty = false;
+            setStatus('saved');
+            schedulePreview();
+        }
+        if (backlog) backlog.onIndexChanged();
+    }
+
+    const backlogApi = {
+        hasFolder: () => !!dirHandle,
+        dirName: () => (dirHandle ? dirHandle.name : ''),
+        listNotes: () => Object.keys(fileHandleMap),
+        getText: (path) => (path === currentFileName ? editor.value : (noteCache[path] ? noteCache[path].text : null)),
+        currentFile: () => currentFileName,
+        selectedFolder: () => selectedFolderPath,
+        openDirectory,
+        openNote: (path) => (fileHandleMap[path] ? openFileByPath(path, fileHandleMap[path]) : null),
+        createFile,
+        writeNote,
+        promptName,
+        renderInto,
+        showEditorArea: () => {
+            if (currentFileName) splitPane.classList.remove('hidden');
+            else if (!dirHandle) welcomeScreen.style.display = '';
+        },
+        hideEditorArea: () => {
+            splitPane.classList.add('hidden');
+            welcomeScreen.style.display = 'none';
+        },
+        splitFrontmatter,
+        parseLinkTarget,
+        resolveNotePath,
+        noteTitle,
+        dirOf,
+        escapeHtml,
+        foldText,
+        slugify,
+        fenceMask,
+        loadJson,
+        saveJson
+    };
+
     // ── Initialize ─────────────────────────────────────
+    if (window.MDBacklog) backlog = window.MDBacklog.create(backlogApi);
     initResizeHandle();
     showSideTab(loadJson('sideTab', 'backlinks'));
 
