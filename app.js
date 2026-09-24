@@ -28,6 +28,16 @@
 
     // ── Folder State ───────────────────────────────────
     let selectedFolderPath = '';   // destino de "novo arquivo" / "nova pasta"
+
+    // ── Backlog Map (backlog.js) ───────────────────────
+    let backlog = null;
+
+    // ── Mode ───────────────────────────────────────────
+    // 'editor': edição de texto. 'map': mapa de backlog (product manager).
+    // A moldura (lateral, título, árvore, atalhos) consulta este estado.
+    let mode = 'editor';
+    let mapSelection = '';         // nota selecionada no mapa ('' = visão geral)
+    let tabBeforeMap = null;
     let collapsedFolders = new Set(loadJson('collapsedFolders', []));
 
     // ── DOM Elements ───────────────────────────────────
@@ -372,7 +382,8 @@
             const kv = line.match(/^([^\s:#-][^:]*):\s*(.*)$/);
             if (!kv) continue;
             let value = kv[2].trim();
-            if (/^\[.*\]$/.test(value)) {
+            // "[a, b]" é lista; "[[Nota]]" é wikilink.
+            if (/^\[.*\]$/.test(value) && !value.startsWith('[[')) {
                 value = value.slice(1, -1).split(',').map(s => unquote(s.trim())).filter(Boolean);
             } else {
                 value = unquote(value);
@@ -640,6 +651,7 @@
         await buildBacklinkIndex(tree);
         updateBacklinksPanel();
         updateMentionsPanel();
+        if (backlog) backlog.onIndexChanged();
     }
 
     async function scanDirectory(handle, path) {
@@ -753,7 +765,7 @@
             li.classList.add('file-item');
             li.dataset.path = fileEntry.path;
             li.style.paddingLeft = `${16 + depth * 16}px`;
-            if (fileEntry.path === currentFileName) li.classList.add('active');
+            if (fileEntry.path === panelTarget()) li.classList.add('active');
 
             li.innerHTML = `
                 <span class="file-icon">📄</span>
@@ -767,7 +779,7 @@
 
             li.addEventListener('click', (e) => {
                 if (e.target.closest('.file-delete') || li.classList.contains('renaming')) return;
-                openFileByPath(fileEntry.path, fileEntry.handle);
+                navigateTo(fileEntry.path);
             });
 
             li.querySelector('.file-delete').addEventListener('click', (e) => {
@@ -858,15 +870,13 @@
             preview.scrollTop = 0;
             updateFileName();
             setStatus('saved');
-            highlightActiveFile();
+            if (mode === 'editor') splitPane.classList.remove('hidden');
             if (dirHandle) {
-                selectFolder(dirOf(path));
+                if (mode === 'editor') selectFolder(dirOf(path));
                 rememberRecent(path);
                 saveJson('lastFile:' + dirHandle.name, path);
             }
-            sidePanel.classList.remove('hidden');
-            updateBacklinksPanel();
-            updateMentionsPanel();
+            refreshContext();
         } catch (err) {
             console.error('Erro ao abrir arquivo:', err);
         }
@@ -881,8 +891,8 @@
         preview.innerHTML = '';
         updateFileName();
         setStatus('saved');
-        sidePanel.classList.add('hidden');
         splitPane.classList.add('hidden');
+        refreshContext();
     }
 
     // Salvamentos passam por uma fila: dois createWritable simultâneos no
@@ -913,6 +923,7 @@
             noteCache[path] = { modified: -1, size: -1, text: content, masked: null };
             indexLinks(path, content);
             updateBacklinksPanel();
+            if (backlog) backlog.onIndexChanged();
         } catch (err) {
             console.error('Erro ao salvar:', err);
             setStatus('unsaved');
@@ -928,7 +939,7 @@
 
     // Cria `input` (pode conter subpastas: "projetos/ideia") dentro de `baseFolder`.
     // Nunca sobrescreve: se o arquivo existe, avisa e não faz nada.
-    async function createFile(input, baseFolder = '', content = '') {
+    async function createFile(input, baseFolder = '', content = '', open = true) {
         if (!dirHandle) return null;
         let rel = input.trim().replace(/\\/g, '/');
         if (!rel) return null;
@@ -950,7 +961,7 @@
             const handle = await parent.getFileHandle(name, { create: true });
             await writeFile(handle, content);
             await refreshFileList();
-            await openFileByPath(path, fileHandleMap[path] || handle);
+            if (open) await openFileByPath(path, fileHandleMap[path] || handle);
             return path;
         } catch (err) {
             console.error('Erro ao criar arquivo:', err);
@@ -1067,10 +1078,11 @@
     }
 
     function updateBacklinksPanel() {
-        if (!currentFileName) return;
+        const target = panelTarget();
+        if (!target) return;
 
-        const title = noteTitle(currentFileName).toLowerCase();
-        const linkedPaths = (backlinkIndex[title] || []).filter(p => p !== currentFileName);
+        const title = noteTitle(target).toLowerCase();
+        const linkedPaths = (backlinkIndex[title] || []).filter(p => p !== target);
         const linkedList = $('#backlinks-linked-list');
         $('#backlinks-linked-count').textContent = linkedPaths.length;
         linkedList.innerHTML = '';
@@ -1084,10 +1096,7 @@
             li.className = 'backlink-item';
             li.innerHTML = `<span class="backlink-icon">📄</span><span class="backlink-name">${escapeHtml(noteTitle(path))}</span>`;
             li.title = path;
-            li.addEventListener('click', () => {
-                const handle = fileHandleMap[path];
-                if (handle) openFileByPath(path, handle);
-            });
+            li.addEventListener('click', () => navigateTo(path));
             linkedList.appendChild(li);
         });
     }
@@ -1141,9 +1150,10 @@
         const countEl = $('#mentions-count');
         list.innerHTML = '';
         countEl.textContent = 0;
-        if (!currentFileName) return;
+        const target = panelTarget();
+        if (!target) return;
 
-        const title = noteTitle(currentFileName);
+        const title = noteTitle(target);
         if (title.length < 3) {
             list.appendChild(emptyItem('Título curto demais para buscar menções'));
             return;
@@ -1151,9 +1161,10 @@
 
         const results = [];
         for (const [path, entry] of Object.entries(noteCache)) {
-            if (path === currentFileName || !fileHandleMap[path]) continue;
-            const mentions = findMentions(path, entry.text, title);
-            if (mentions.length) results.push({ path, text: entry.text, mentions });
+            if (path === target || !fileHandleMap[path]) continue;
+            const text = path === currentFileName ? editor.value : entry.text;
+            const mentions = findMentions(path, text, title);
+            if (mentions.length) results.push({ path, text, mentions });
         }
         countEl.textContent = results.length;
 
@@ -1179,7 +1190,7 @@
             `;
             li.addEventListener('click', (e) => {
                 if (e.target.closest('.mention-link')) return;
-                openFileByPath(path, fileHandleMap[path]);
+                navigateTo(path);
             });
             li.querySelector('.mention-link').addEventListener('click', () => linkMentions(path, title));
             list.appendChild(li);
@@ -1189,7 +1200,7 @@
     async function linkMentions(path, title) {
         try {
             const handle = fileHandleMap[path];
-            const text = await (await handle.getFile()).text();
+            const text = path === currentFileName ? editor.value : await (await handle.getFile()).text();
             const mentions = findMentions(null, text, title);
             if (!mentions.length) return;
             let out = text;
@@ -1197,10 +1208,7 @@
                 const link = m.text === title ? `[[${title}]]` : `[[${title}|${m.text}]]`;
                 out = out.slice(0, m.index) + link + out.slice(m.index + m.text.length);
             }
-            await writeFile(handle, out);
-            noteCache[path] = { modified: -1, size: -1, text: out, masked: null };
-            indexLinks(path, out);
-            updateBacklinksPanel();
+            await writeNote(path, out);
             updateMentionsPanel();
         } catch (err) {
             console.error('Erro ao vincular menções:', err);
@@ -1252,14 +1260,14 @@
 
     // ── Side Panel Tabs ────────────────────────────────
 
-    function showSideTab(name) {
+    function showSideTab(name, persist = true) {
         sidePanel.querySelectorAll('.side-tab').forEach(tab => {
             tab.classList.toggle('active', tab.dataset.tab === name);
         });
         sidePanel.querySelectorAll('.side-tab-panel').forEach(panel => {
             panel.classList.toggle('hidden', panel.dataset.panel !== name);
         });
-        saveJson('sideTab', name);
+        if (persist) saveJson('sideTab', name);
     }
 
     sidePanel.querySelectorAll('.side-tab').forEach(tab => {
@@ -1392,12 +1400,7 @@
                 if (updated === content) continue;
                 await writeFile(handle, updated);
                 noteCache[path] = { modified: -1, size: -1, text: updated, masked: null };
-                if (path === currentFileName) {
-                    editor.value = updated;
-                    isDirty = false;
-                    setStatus('saved');
-                    updatePreview();
-                }
+                if (path === currentFileName) syncEditorWithDisk(updated);
             } catch (_) { /* skip */ }
         }
     }
@@ -1407,8 +1410,67 @@
     function showEditor() {
         welcomeScreen.style.display = 'none';
         // Don't show split pane until a file is opened, but we show it if there's already a file
-        if (currentFileName) {
+        if (currentFileName && mode === 'editor') {
             splitPane.classList.remove('hidden');
+        }
+    }
+
+    // Nota que a moldura descreve: a aberta no editor ou a selecionada no mapa.
+    function panelTarget() {
+        return mode === 'map' ? mapSelection : currentFileName;
+    }
+
+    function setMode(next) {
+        if (mode === next) return;
+        mode = next;
+        document.body.classList.toggle('map-mode', next === 'map');
+        closeAutocomplete();
+        if (next === 'map') {
+            splitPane.classList.add('hidden');
+            welcomeScreen.style.display = 'none';
+            // O sumário descreve o preview do editor, que some no mapa.
+            const active = sidePanel.querySelector('.side-tab.active');
+            tabBeforeMap = active ? active.dataset.tab : null;
+            if (tabBeforeMap === 'outline') showSideTab('backlinks', false);
+        } else {
+            if (currentFileName) splitPane.classList.remove('hidden');
+            else if (!dirHandle) welcomeScreen.style.display = '';
+            if (tabBeforeMap === 'outline') showSideTab('outline', false);
+            tabBeforeMap = null;
+        }
+        refreshContext();
+    }
+
+    // Abre `path` no modo atual: no mapa, seleciona o item (ou mostra a nota
+    // no painel do mapa); no editor, abre para edição.
+    function navigateTo(path) {
+        if (mode === 'map' && backlog) backlog.focusPath(path);
+        else if (fileHandleMap[path]) openFileByPath(path, fileHandleMap[path]);
+    }
+
+    function openInEditor(path) {
+        setMode('editor');
+        if (fileHandleMap[path]) return openFileByPath(path, fileHandleMap[path]);
+        return null;
+    }
+
+    // Atualiza título da aba, destaque na árvore e painel lateral.
+    function refreshContext() {
+        updateTitle();
+        highlightActiveFile();
+        const target = panelTarget();
+        sidePanel.classList.toggle('hidden', !target);
+        if (target) {
+            updateBacklinksPanel();
+            updateMentionsPanel();
+        }
+    }
+
+    function updateTitle() {
+        if (mode === 'map') {
+            document.title = `Mapa — ${dirHandle ? dirHandle.name : 'backlog'} — MD Editor`;
+        } else {
+            document.title = currentFileName ? `${noteTitle(currentFileName)} — MD Editor` : 'MarkDown Editor';
         }
     }
 
@@ -1685,17 +1747,14 @@
 
     function updateFileName() {
         fileName.textContent = currentFileName || '';
-        document.title = currentFileName ? `${noteTitle(currentFileName)} — MD Editor` : 'MarkDown Editor';
+        updateTitle();
     }
 
     function highlightActiveFile() {
+        const target = panelTarget();
         fileList.querySelectorAll('.file-item').forEach(li => {
-            li.classList.toggle('active', li.dataset.path === currentFileName);
+            li.classList.toggle('active', li.dataset.path === target);
         });
-        // Show the split pane when a file is opened
-        if (currentFileName) {
-            splitPane.classList.remove('hidden');
-        }
     }
 
     function setStatus(state) {
@@ -1797,6 +1856,52 @@
         return changed ? lines.join('\n') : null;
     }
 
+    // Trecho que difere entre dois textos: prefixo e sufixo comuns.
+    function diffRange(text, next) {
+        let head = 0;
+        while (head < text.length && text[head] === next[head]) head++;
+        let tail = 0;
+        while (tail < text.length - head && tail < next.length - head &&
+            text[text.length - 1 - tail] === next[next.length - 1 - tail]) tail++;
+        return { head, tail };
+    }
+
+    // Troca o texto do editor por `next` mexendo só no trecho alterado, pelo
+    // mesmo caminho da digitação: o Ctrl+Z continua funcionando. No modo mapa
+    // o editor está escondido e não aceita foco; ele fica fora da tela, mas
+    // renderizado, durante a troca.
+    function replaceEditorText(next) {
+        const text = editor.value;
+        if (text === next) return;
+        const { head, tail } = diffRange(text, next);
+        const oldEnd = text.length - tail;
+        const newEnd = next.length - tail;
+        const shift = (p) => (p <= head ? p : (p >= oldEnd ? p + newEnd - oldEnd : newEnd));
+        const sel = [shift(editor.selectionStart), shift(editor.selectionEnd)];
+        const active = document.activeElement;
+        const hidden = splitPane.classList.contains('hidden');
+        if (hidden) splitPane.classList.replace('hidden', 'offscreen');
+        try {
+            editEditor(head, oldEnd, next.slice(head, newEnd), true);
+        } finally {
+            if (hidden) splitPane.classList.replace('offscreen', 'hidden');
+        }
+        editor.setSelectionRange(sel[0], sel[1]);
+        if (active && active !== editor && active !== document.body) active.focus({ preventScroll: true });
+    }
+
+    // Depois de gravar `text` em disco para a nota aberta, alinha o editor.
+    function syncEditorWithDisk(text) {
+        replaceEditorText(text);
+        clearTimeout(autoSaveTimer);
+        if (editor.value === text) {
+            isDirty = false;
+            setStatus('saved');
+        } else {
+            scheduleAutoSave();
+        }
+    }
+
     let renumbering = false;
 
     function applyRenumber() {
@@ -1805,11 +1910,7 @@
         const next = renumberOrderedLists(text);
         if (next === null) return;
         // Troca só o trecho que mudou, para o Ctrl+Z desfazer só a renumeração.
-        let head = 0;
-        while (head < text.length && text[head] === next[head]) head++;
-        let tail = 0;
-        while (tail < text.length - head && tail < next.length - head &&
-            text[text.length - 1 - tail] === next[next.length - 1 - tail]) tail++;
+        const { head, tail } = diffRange(text, next);
         const caret = editor.selectionStart;
         const delta = next.length - text.length;
         renumbering = true;
@@ -2384,15 +2485,39 @@
     btnDailyNote.addEventListener('click', openDailyNote);
     $('#btn-select-root').addEventListener('click', () => selectFolder(''));
 
+    // Pede um nome no mesmo modal e devolve o texto (ou null se cancelar).
+    let promptResolve = null;
+
+    function promptName(title, location, placeholder) {
+        if (promptResolve) promptResolve(null);
+        modalMode = 'prompt';
+        modalTitle.textContent = title;
+        modalLocation.textContent = location;
+        newFileInput.placeholder = placeholder || '';
+        newFileInput.value = '';
+        modalOverlay.classList.remove('hidden');
+        setTimeout(() => newFileInput.focus(), 100);
+        return new Promise((resolve) => { promptResolve = resolve; });
+    }
+
+    function settlePrompt(value) {
+        if (!promptResolve) return;
+        const resolve = promptResolve;
+        promptResolve = null;
+        resolve(value);
+    }
+
     modalCancel.addEventListener('click', () => {
         modalOverlay.classList.add('hidden');
+        settlePrompt(null);
     });
 
     modalCreate.addEventListener('click', () => {
         const name = newFileInput.value.trim();
         if (!name) return;
         modalOverlay.classList.add('hidden');
-        if (modalMode === 'file') createFile(name, selectedFolderPath);
+        if (modalMode === 'prompt') settlePrompt(name);
+        else if (modalMode === 'file') createFile(name, selectedFolderPath);
         else createFolder(name);
     });
 
@@ -2447,6 +2572,7 @@
 
     function openSwitcher() {
         switcherInput.value = '';
+        switcherInput.placeholder = mode === 'map' ? 'Buscar épico, feature ou item...' : 'Buscar nota pelo nome...';
         switcherOverlay.classList.remove('hidden');
         renderSwitcher();
         setTimeout(() => switcherInput.focus(), 0);
@@ -2454,6 +2580,16 @@
 
     function renderSwitcher() {
         const query = switcherInput.value.trim();
+        if (mode === 'map' && backlog) {
+            switcher.items = backlog.listItems()
+                .map(item => ({ ...item, score: fuzzyScore(query, `${item.id} ${item.title}`) }))
+                .filter(item => item.score > 0)
+                .sort((a, b) => b.score - a.score || a.title.localeCompare(b.title, 'pt-BR', { numeric: true }))
+                .slice(0, 50);
+            switcher.index = 0;
+            drawSwitcherList();
+            return;
+        }
         const paths = Object.keys(fileHandleMap);
         let items;
         if (!query) {
@@ -2478,13 +2614,15 @@
     function drawSwitcherList() {
         switcherList.innerHTML = '';
         if (!switcher.items.length) {
-            switcherList.appendChild(emptyItem('Nenhuma nota nesta pasta'));
+            switcherList.appendChild(emptyItem(mode === 'map' ? 'Nenhum item do backlog encontrado' : 'Nenhuma nota nesta pasta'));
             return;
         }
         switcher.items.forEach((item, i) => {
             const li = document.createElement('li');
             li.className = 'switcher-item' + (i === switcher.index ? ' active' : '');
-            li.innerHTML = item.create
+            li.innerHTML = item.type
+                ? `<span class="switcher-title">${escapeHtml(item.title)}</span><span class="switcher-path">${escapeHtml(item.type)}${item.id ? ' · ' + escapeHtml(item.id) : ''}</span>`
+                : item.create
                 ? `<span class="switcher-title">＋ Criar nota “${escapeHtml(item.create)}”</span><span class="switcher-path">${escapeHtml(selectedFolderPath || '(raiz)')}</span>`
                 : `<span class="switcher-title">${escapeHtml(noteTitle(item.path))}</span><span class="switcher-path">${escapeHtml(dirOf(item.path))}</span>`;
             li.addEventListener('click', () => {
@@ -2502,7 +2640,7 @@
         if (!item) return;
         switcherOverlay.classList.add('hidden');
         if (item.create) createFile(item.create, selectedFolderPath);
-        else openFileByPath(item.path, fileHandleMap[item.path]);
+        else navigateTo(item.path);
     }
 
     switcherInput.addEventListener('input', renderSwitcher);
@@ -2721,6 +2859,7 @@
     // ── PWA: arquivos abertos pelo sistema (.md com duplo clique) ──
 
     async function openLaunchedFile(handle) {
+        setMode('editor');
         if (dirHandle) {
             const parts = await dirHandle.resolve(handle);
             if (parts) {
@@ -2734,7 +2873,55 @@
         await openFileByPath(handle.name, handle);
     }
 
+    // ── Backlog Map API ────────────────────────────────
+    // Interface estreita que o backlog.js usa para ler e gravar notas.
+
+    // Grava uma nota inteira (usado para mudar o status pelo mapa).
+    async function writeNote(path, text) {
+        const handle = path === currentFileName ? currentFileHandle : fileHandleMap[path];
+        await writeFile(handle, text);
+        noteCache[path] = { modified: -1, size: -1, text, masked: null };
+        indexLinks(path, text);
+        if (path === currentFileName) syncEditorWithDisk(text);
+        updateBacklinksPanel();
+        if (backlog) backlog.onIndexChanged();
+    }
+
+    const backlogApi = {
+        hasFolder: () => !!dirHandle,
+        dirName: () => (dirHandle ? dirHandle.name : ''),
+        listNotes: () => Object.keys(fileHandleMap),
+        getText: (path) => (path === currentFileName ? editor.value : (noteCache[path] ? noteCache[path].text : null)),
+        currentFile: () => currentFileName,
+        selectedFolder: () => selectedFolderPath,
+        openDirectory,
+        openInEditor,
+        setMode,
+        // O mapa informa qual nota está selecionada; a moldura passa a descrevê-la.
+        onMapSelection: (path) => {
+            if (path === mapSelection) return;
+            mapSelection = path || '';
+            if (mode === 'map') refreshContext();
+        },
+        createFile,
+        writeNote,
+        promptName,
+        renderInto,
+        splitFrontmatter,
+        parseLinkTarget,
+        resolveNotePath,
+        noteTitle,
+        dirOf,
+        escapeHtml,
+        foldText,
+        slugify,
+        fenceMask,
+        loadJson,
+        saveJson
+    };
+
     // ── Initialize ─────────────────────────────────────
+    if (window.MDBacklog) backlog = window.MDBacklog.create(backlogApi);
     initResizeHandle();
     showSideTab(loadJson('sideTab', 'backlinks'));
 

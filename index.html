@@ -216,6 +216,17 @@
                 </div>
 
                 <div class="toolbar-right">
+                    <button id="btn-backlog" class="tool-btn-text btn-map" title="Mapa de épicos, features e itens">
+                        <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                            <rect x="1" y="6" width="4" height="4" rx="1" stroke="currentColor" stroke-width="1.2" />
+                            <rect x="11" y="1.5" width="4" height="3.5" rx="1" stroke="currentColor" stroke-width="1.2" />
+                            <rect x="11" y="6.3" width="4" height="3.5" rx="1" stroke="currentColor" stroke-width="1.2" />
+                            <rect x="11" y="11" width="4" height="3.5" rx="1" stroke="currentColor" stroke-width="1.2" />
+                            <path d="M5 8h3M8 3.2v9.6M8 3.2h3M8 8h3M8 12.8h3" stroke="currentColor" stroke-width="1.1" />
+                        </svg>
+                        Mapa
+                    </button>
+                    <div class="toolbar-divider"></div>
                     <button id="btn-export-html" class="tool-btn-text" title="Exportar HTML">
                         <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
                             <path d="M4 13h8M8 3v8M5 8l3 3 3-3" stroke="currentColor" stroke-width="1.3"
@@ -268,6 +279,50 @@
                             Reabrir “<span class="reopen-name"></span>”
                         </button>
                         <p class="welcome-hint">Funciona com Google Chrome e Microsoft Edge</p>
+                    </div>
+                </div>
+
+                <!-- Backlog Map (backlog.js) -->
+                <div id="backlog-view">
+                    <div class="bl-toolbar">
+                        <nav id="bl-crumbs" class="bl-crumbs"></nav>
+                        <input id="bl-search" type="search" placeholder="Filtrar por nome ou id ( / )" autocomplete="off"
+                            spellcheck="false">
+                        <button id="bl-new-epic" class="tool-btn-text" title="Criar épico com o modelo">+ Épico</button>
+                        <button id="bl-expand" class="tool-btn-text" title="Expandir tudo">Expandir</button>
+                        <button id="bl-collapse" class="tool-btn-text" title="Recolher tudo">Recolher</button>
+                        <button id="bl-fit" class="tool-btn-text" title="Ajustar o mapa à tela">Ajustar</button>
+                        <label class="bl-toggle" title="Mostrar setas de depende/bloqueia/relacionado">
+                            <input id="bl-relations" type="checkbox" checked> Relações
+                        </label>
+                    </div>
+                    <div class="bl-body">
+                        <div id="bl-canvas" class="bl-canvas" tabindex="0">
+                            <div id="bl-stage" class="bl-stage">
+                                <svg id="bl-edges" class="bl-edges"></svg>
+                                <div id="bl-nodes"></div>
+                            </div>
+                            <div class="bl-legend">
+                                <span><i class="bl-dot type-epico"></i>Épico</span>
+                                <span><i class="bl-dot type-feature"></i>Feature</span>
+                                <span><i class="bl-dot type-item"></i>Item</span>
+                                <span><i class="bl-line rel-depends"></i>depende de</span>
+                                <span><i class="bl-line rel-blocks"></i>bloqueia</span>
+                                <span><i class="bl-line rel-related"></i>relacionado</span>
+                                <span class="bl-legend-hint">Clique: detalhes · Duplo clique: abrir como mapa · Enter: editor</span>
+                            </div>
+                            <div class="bl-zoom">
+                                <button data-zoom="in" title="Aproximar">+</button>
+                                <button data-zoom="out" title="Afastar">−</button>
+                            </div>
+                            <div id="bl-empty" class="bl-empty hidden">
+                                <h3>Nenhum item de backlog nesta pasta</h3>
+                                <p>Crie um épico com o modelo, ou adicione <code>tipo: epico</code>, <code>feature</code> ou
+                                    <code>item</code> ao frontmatter das notas.</p>
+                                <button class="btn-primary" data-action="new-epic">+ Criar épico</button>
+                            </div>
+                        </div>
+                        <aside id="bl-detail" class="bl-detail"></aside>
                     </div>
                 </div>
 
@@ -329,6 +384,7 @@
         </div>
     </div>
 
+    <script src="backlog.js"></script>
     <script src="app.js"></script>
 </body>
 
