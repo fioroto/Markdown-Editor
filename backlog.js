@@ -127,7 +127,6 @@
         const esc = api.escapeHtml;
 
         const view = $('#backlog-view');
-        const main = $('#main');
         const canvas = $('#bl-canvas');
         const stage = $('#bl-stage');
         const edgesEl = $('#bl-edges');
@@ -754,9 +753,21 @@
             </div>`;
         }
 
+        // Nota selecionada no mapa que a moldura do app deve descrever.
+        function notifySelection() {
+            const path = state.selected;
+            const isNote = path && (model.nodes.has(path) || api.listNotes().includes(path));
+            api.onMapSelection(isNote ? path : '');
+        }
+
         async function renderDetail() {
             const gen = ++detailGen;
+            notifySelection();
             const node = nodeByPath(state.selected);
+            if (!node && api.listNotes().includes(state.selected)) {
+                await renderNotePreview(state.selected, gen);
+                return;
+            }
             if (!node || node.type === 'root' || node.type === 'group') {
                 detail.innerHTML = overviewHtml(node && node.type === 'group' ? node : null);
                 return;
@@ -843,6 +854,46 @@
             });
             if (gen !== detailGen) return;
             docEl.replaceChildren(...tmp.childNodes);
+        }
+
+        // Nota fora do backlog: mostrada no painel sem sair do mapa.
+        async function renderNotePreview(path, gen) {
+            detail.innerHTML = `
+                <div class="bl-d-head"><span class="bl-type">Nota</span><span class="bl-id">${esc(api.dirOf(path) || '(raiz)')}</span></div>
+                <h2 class="bl-d-title">${esc(api.noteTitle(path))}</h2>
+                <p class="bl-muted">Esta nota não é épico, feature nem item. Para trazê-la ao mapa, adicione <code>tipo</code> e <code>pai</code> ao frontmatter.</p>
+                <div class="bl-d-actions">
+                    <button class="tool-btn-text" data-action="open">Abrir no editor</button>
+                    <button class="tool-btn-text" data-select="${ROOT}">Voltar à visão geral</button>
+                </div>
+                <section class="bl-section"><h4>Documento</h4><div class="bl-doc markdown-body"><p class="bl-muted">Carregando…</p></div></section>`;
+            const tmp = document.createElement('div');
+            await api.renderInto(tmp, api.getText(path) || '', {
+                interactive: false,
+                dark: true,
+                idPrefix: 'bl-',
+                basePath: path,
+                isStale: () => gen !== detailGen
+            });
+            if (gen !== detailGen) return;
+            detail.querySelector('.bl-doc').replaceChildren(...tmp.childNodes);
+        }
+
+        // Seleciona um item do backlog, ou mostra uma nota comum no painel.
+        function focusPath(path) {
+            if (!model) rebuild();
+            if (model.nodes.has(path)) {
+                select(path, { center: true });
+            } else if (api.listNotes().includes(path)) {
+                state.selected = path;
+                refreshHighlight();
+                renderDetail();
+            }
+        }
+
+        function listItems() {
+            if (!model) rebuild();
+            return [...model.nodes.values()].map(n => ({ path: n.path, title: n.title, id: n.id, type: TYPES[n.type].label }));
         }
 
         function overviewHtml(group) {
@@ -996,7 +1047,7 @@ relacionado: ["[[Nota Y]]"]
             const node = nodeByPath(el.dataset.path);
             if (!node) return;
             if (node.children.length) setFocus(node.path);
-            else if (node.fill) api.openNote(node.path);
+            else if (node.fill) api.openInEditor(node.path);
         });
 
         crumbs.addEventListener('click', (e) => {
@@ -1010,11 +1061,11 @@ relacionado: ["[[Nota Y]]"]
             if (target.dataset.select) {
                 select(target.dataset.select, { center: true });
             } else if (target.dataset.open) {
-                api.openNote(target.dataset.open);
+                focusPath(target.dataset.open);
             } else if (target.dataset.action) {
                 const node = nodeByPath(state.selected);
                 const action = target.dataset.action;
-                if (action === 'open' && node) api.openNote(node.path);
+                if (action === 'open') api.openInEditor(state.selected);
                 else if (action === 'focus' && node) setFocus(node.path);
                 else if (action === 'child' && node) createItem(TYPES[node.type].child, node.path);
                 else if (action === 'new-epic') createItem('epico', null);
@@ -1022,8 +1073,7 @@ relacionado: ["[[Nota Y]]"]
                 e.preventDefault();
                 const { note } = api.parseLinkTarget(target.dataset.wikilink);
                 const path = api.resolveNotePath(note);
-                if (path && model.nodes.has(path)) select(path, { center: true });
-                else if (path) api.openNote(path);
+                if (path) focusPath(path);
             } else {
                 e.preventDefault();
                 const href = target.getAttribute('href');
@@ -1146,7 +1196,7 @@ relacionado: ["[[Nota Y]]"]
                 e.preventDefault();
                 return;
             } else if (e.key === 'Enter') {
-                if (node.fill) api.openNote(node.path);
+                if (node.fill) api.openInEditor(node.path);
                 e.preventDefault();
                 return;
             } else if (e.key === '/') {
@@ -1179,14 +1229,15 @@ relacionado: ["[[Nota Y]]"]
 
         // ── Ciclo de vida ──────────────────────────────
 
+        // O modo é do app (classe map-mode no body); o mapa só o consulta.
         function isVisible() {
-            return !view.classList.contains('hidden');
+            return document.body.classList.contains('map-mode');
         }
 
         function rebuild() {
             if (state.dir !== api.dirName()) loadState();
             model = buildModel();
-            if (!nodeByPath(state.selected)) state.selected = state.focus;
+            if (!nodeByPath(state.selected) && !api.listNotes().includes(state.selected)) state.selected = state.focus;
         }
 
         async function show() {
@@ -1194,10 +1245,7 @@ relacionado: ["[[Nota Y]]"]
                 await api.openDirectory();
                 if (!api.hasFolder()) return;
             }
-            api.hideEditorArea();
-            view.classList.remove('hidden');
-            main.classList.add('map-mode');
-            btnMap.classList.add('active');
+            api.setMode('map');
             // Sempre reconstrói: a nota aberta pode ter edições ainda não salvas.
             rebuild();
             // Aberto a partir de uma nota do backlog: seleciona essa nota.
@@ -1215,11 +1263,7 @@ relacionado: ["[[Nota Y]]"]
         }
 
         function hide() {
-            if (!isVisible()) return;
-            view.classList.add('hidden');
-            main.classList.remove('map-mode');
-            btnMap.classList.remove('active');
-            api.showEditorArea();
+            api.setMode('editor');
         }
 
         function toggle() {
@@ -1234,13 +1278,9 @@ relacionado: ["[[Nota Y]]"]
             renderDetail();
         }
 
-        function onFileOpened() {
-            hide();
-        }
-
         new ResizeObserver(() => { if (isVisible() && state.fitPending) fit(); }).observe(canvas);
 
-        return { show, hide, toggle, isVisible, onIndexChanged, onFileOpened };
+        return { show, hide, toggle, isVisible, onIndexChanged, focusPath, listItems };
     }
 
     window.MDBacklog = { create };

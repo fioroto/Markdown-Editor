@@ -1556,23 +1556,43 @@ body {
     --rel-related: #8b949e;
 }
 
-.btn-map.active {
+/* O modo vem da classe map-mode no body (app.js: setMode). */
+body.map-mode .btn-map {
     color: var(--accent);
     border-color: var(--accent);
     background: var(--accent-glow);
 }
 
-#main.map-mode .toolbar-group,
-#main.map-mode #btn-export-html,
-#main.map-mode #btn-preview-html,
-#main.map-mode #btn-print-pdf {
+/* Ferramentas só do editor somem no mapa. */
+body.map-mode .toolbar-group,
+body.map-mode #btn-export-html,
+body.map-mode #btn-preview-html,
+body.map-mode #btn-print-pdf,
+body.map-mode #btn-daily-note,
+body.map-mode #btn-new-file,
+body.map-mode .side-tab[data-tab="outline"] {
     display: none;
 }
 
 #backlog-view {
-    display: flex;
+    display: none;
     flex-direction: column;
     height: 100%;
+}
+
+body.map-mode #backlog-view {
+    display: flex;
+}
+
+/* Editor fora da tela, mas focável, enquanto o mapa altera a nota aberta. */
+#split-pane.offscreen {
+    position: fixed;
+    left: -10000px;
+    top: 0;
+    width: 900px;
+    height: 600px;
+    opacity: 0;
+    pointer-events: none;
 }
 
 .bl-toolbar {
