@@ -7,6 +7,10 @@
     <title>MarkDown Editor</title>
     <meta name="description"
         content="Editor de Markdown local com auto-save. Edite arquivos .md direto no seu computador pelo navegador.">
+    <meta name="theme-color" content="#161b22">
+    <link rel="manifest" href="manifest.webmanifest">
+    <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+    <link rel="apple-touch-icon" href="icons/icon-192.png">
 
     <!-- Google Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -23,7 +27,10 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.1/marked.min.js"></script>
 
     <!-- Mermaid.js -->
-    <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@11.17.2/dist/mermaid.min.js"></script>
+
+    <!-- DOMPurify (sanitiza o HTML do preview) -->
+    <script src="https://cdn.jsdelivr.net/npm/dompurify@3.4.16/dist/purify.min.js"></script>
 
     <link rel="stylesheet" href="style.css">
 </head>
@@ -46,27 +53,53 @@
 
             <div id="file-list-container">
                 <div class="file-list-header">
-                    <span class="file-list-title">ARQUIVOS</span>
-                    <button id="btn-new-file" class="btn-icon" title="Novo arquivo">
-                        <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-                            <path d="M7 1v12M1 7h12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
-                        </svg>
-                    </button>
+                    <button id="btn-select-root" class="file-list-title file-list-root"
+                        title="Criar novos arquivos na raiz da pasta">ARQUIVOS</button>
+                    <div class="file-list-actions">
+                        <button id="btn-daily-note" class="btn-icon" title="Nota do dia">
+                            <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                                <rect x="1.5" y="2.5" width="11" height="10" rx="1.5" stroke="currentColor"
+                                    stroke-width="1.2" />
+                                <path d="M1.5 5.5h11M4.5 1v3M9.5 1v3" stroke="currentColor" stroke-width="1.2"
+                                    stroke-linecap="round" />
+                            </svg>
+                        </button>
+                        <button id="btn-new-folder" class="btn-icon" title="Nova pasta (na pasta selecionada)">
+                            <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                                <path d="M1 2.5h4l1.3 1.3H13v8H1v-9.3z" stroke="currentColor" stroke-width="1.2"
+                                    stroke-linejoin="round" />
+                                <path d="M7 6v4M5 8h4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" />
+                            </svg>
+                        </button>
+                        <button id="btn-new-file" class="btn-icon" title="Novo arquivo (na pasta selecionada)">
+                            <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                                <path d="M7 1v12M1 7h12" stroke="currentColor" stroke-width="1.5"
+                                    stroke-linecap="round" />
+                            </svg>
+                        </button>
+                    </div>
                 </div>
                 <ul id="file-list">
                     <li class="empty-state">Nenhuma pasta aberta</li>
                 </ul>
             </div>
 
-            <!-- Backlinks Panel -->
-            <div id="backlinks-panel" class="hidden">
-                <div class="backlinks-header">
-                    <span class="file-list-title">LINKS DE ENTRADA</span>
-                    <span id="backlinks-linked-count" class="backlinks-count">0</span>
+            <!-- Side Panel: links de entrada, menções sem link, sumário -->
+            <div id="side-panel" class="hidden">
+                <div class="side-tabs">
+                    <button class="side-tab active" data-tab="backlinks" title="Notas com link para esta">
+                        Links <span id="backlinks-linked-count" class="backlinks-count">0</span>
+                    </button>
+                    <button class="side-tab" data-tab="mentions" title="Notas que citam o título sem link">
+                        Menções <span id="mentions-count" class="backlinks-count">0</span>
+                    </button>
+                    <button class="side-tab" data-tab="outline" title="Títulos desta nota">Sumário</button>
                 </div>
-                <ul id="backlinks-linked-list" class="backlinks-list">
+                <ul id="backlinks-linked-list" class="backlinks-list side-tab-panel" data-panel="backlinks">
                     <li class="backlink-empty">Abra um arquivo para ver referências</li>
                 </ul>
+                <ul id="mentions-list" class="backlinks-list side-tab-panel hidden" data-panel="mentions"></ul>
+                <ul id="outline-list" class="backlinks-list side-tab-panel hidden" data-panel="outline"></ul>
             </div>
 
             <div class="sidebar-footer">
@@ -79,7 +112,7 @@
             <!-- Toolbar -->
             <div id="toolbar">
                 <div class="toolbar-group">
-                    <button class="tool-btn" data-action="heading" title="Título (Ctrl+H)">
+                    <button class="tool-btn" data-action="heading" title="Título">
                         <strong>H</strong>
                     </button>
                     <button class="tool-btn" data-action="bold" title="Negrito (Ctrl+B)">
@@ -143,11 +176,25 @@
                                 stroke-linecap="round" />
                         </svg>
                     </button>
+                    <button class="tool-btn" data-action="task" title="Tarefa">
+                        <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                            <rect x="2" y="2.5" width="11" height="11" rx="2" stroke="currentColor" stroke-width="1.2" />
+                            <path d="M5 8l2 2 4-4.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"
+                                stroke-linejoin="round" />
+                        </svg>
+                    </button>
                     <button class="tool-btn" data-action="quote" title="Citação">
                         <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
                             <path d="M3 4v8" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" />
                             <path d="M7 5h7M7 8h5M7 11h6" stroke="currentColor" stroke-width="1.2"
                                 stroke-linecap="round" />
+                        </svg>
+                    </button>
+                    <button class="tool-btn" data-action="callout" title="Callout (&gt; [!note])">
+                        <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                            <rect x="2" y="2.5" width="12" height="11" rx="1.5" stroke="currentColor" stroke-width="1.2" />
+                            <path d="M8 5.5v3.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" />
+                            <circle cx="8" cy="11" r="0.8" fill="currentColor" />
                         </svg>
                     </button>
                     <div class="toolbar-divider"></div>
@@ -186,6 +233,14 @@
                         </svg>
                         Preview
                     </button>
+                    <button id="btn-print-pdf" class="tool-btn-text" title="Imprimir ou salvar como PDF">
+                        <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                            <path d="M4.5 6V2h7v4" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" />
+                            <rect x="2" y="6" width="12" height="5.5" rx="1.2" stroke="currentColor" stroke-width="1.2" />
+                            <path d="M4.5 10h7v4h-7z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" />
+                        </svg>
+                        PDF
+                    </button>
                     <div class="toolbar-divider"></div>
                     <div id="save-status" class="save-status">
                         <span class="status-dot"></span>
@@ -209,6 +264,9 @@
                             </svg>
                             Abrir Pasta
                         </button>
+                        <button id="btn-welcome-reopen" class="btn-ghost btn-reopen hidden">
+                            Reabrir “<span class="reopen-name"></span>”
+                        </button>
                         <p class="welcome-hint">Funciona com Google Chrome e Microsoft Edge</p>
                     </div>
                 </div>
@@ -221,7 +279,8 @@
                             <span id="file-name" class="file-name"></span>
                         </div>
                         <textarea id="editor" spellcheck="false"
-                            placeholder="Comece a escrever em Markdown..."></textarea>
+                            placeholder="Comece a escrever em Markdown... ([[ sugere notas, Ctrl+V cola imagens)"></textarea>
+                        <ul id="autocomplete" class="autocomplete hidden"></ul>
                     </div>
                     <div id="resize-handle" title="Arrastar para redimensionar"></div>
                     <div id="preview-pane">
@@ -238,7 +297,8 @@
     <!-- New File Modal -->
     <div id="modal-overlay" class="modal-overlay hidden">
         <div class="modal">
-            <h3>Novo Arquivo</h3>
+            <h3 id="new-file-title">Novo Arquivo</h3>
+            <p id="new-file-location" class="modal-hint"></p>
             <input id="new-file-input" type="text" placeholder="nome-do-arquivo.md" autocomplete="off">
             <div class="modal-actions">
                 <button id="modal-cancel" class="btn-ghost">Cancelar</button>
@@ -256,6 +316,16 @@
                 <button id="delete-cancel" class="btn-ghost">Cancelar</button>
                 <button id="delete-confirm" class="btn-danger">Deletar</button>
             </div>
+        </div>
+    </div>
+
+    <!-- Quick Switcher (Ctrl+P / Ctrl+O) -->
+    <div id="switcher-overlay" class="modal-overlay modal-top hidden">
+        <div class="modal switcher">
+            <input id="switcher-input" type="text" placeholder="Buscar nota pelo nome..." autocomplete="off"
+                spellcheck="false">
+            <ul id="switcher-list" class="switcher-list"></ul>
+            <div class="switcher-hint">↑↓ navegar · Enter abrir · Esc fechar</div>
         </div>
     </div>
 

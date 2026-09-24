@@ -685,6 +685,7 @@ body {
 
 /* ===== EDITOR PANE ===== */
 #editor-pane {
+    position: relative;
     display: flex;
     flex-direction: column;
     overflow: hidden;
@@ -912,6 +913,15 @@ body {
     accent-color: var(--accent);
 }
 
+.markdown-body input[type="checkbox"][data-task] {
+    cursor: pointer;
+}
+
+.markdown-body li:has(> input[type="checkbox"]) {
+    list-style: none;
+    margin-left: -18px;
+}
+
 /* ===== MERMAID DIAGRAMS ===== */
 .markdown-body .mermaid-block {
     margin: 16px 0;
@@ -996,6 +1006,13 @@ body {
     color: var(--text-secondary);
     margin-bottom: 20px;
     font-size: 14px;
+}
+
+.modal-hint {
+    margin: -8px 0 12px !important;
+    font-size: 12px !important;
+    color: var(--text-muted) !important;
+    font-family: var(--font-mono);
 }
 
 .modal input[type="text"] {
@@ -1092,21 +1109,48 @@ body {
     min-height: 60px;
 }
 
-#backlinks-panel {
+#side-panel {
     border-top: 1px solid var(--border);
     flex-shrink: 0;
-    max-height: 220px;
+    height: 38%;
+    min-height: 160px;
     display: flex;
     flex-direction: column;
     overflow: hidden;
 }
 
-.backlinks-header {
+.side-tabs {
+    display: flex;
+    gap: 2px;
+    padding: 6px 8px 4px;
+    flex-shrink: 0;
+}
+
+.side-tab {
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    padding: 8px 16px 6px;
-    flex-shrink: 0;
+    gap: 5px;
+    padding: 4px 8px;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: var(--radius-sm);
+    color: var(--text-muted);
+    font-family: var(--font-ui);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.3px;
+    cursor: pointer;
+    transition: all var(--transition);
+}
+
+.side-tab:hover {
+    color: var(--text-primary);
+}
+
+.side-tab.active {
+    color: var(--text-primary);
+    background: var(--bg-tertiary);
+    border-color: var(--border);
 }
 
 .backlinks-count {
@@ -1185,4 +1229,314 @@ body {
 
 .file-item.renaming .rename-input {
     pointer-events: all;
+}
+/* ===== FILE LIST HEADER ===== */
+.file-list-root {
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-family: var(--font-ui);
+    padding: 0;
+}
+
+.file-list-root:hover {
+    color: var(--text-secondary);
+}
+
+.file-list-actions {
+    display: flex;
+    gap: 2px;
+}
+
+.folder-item.selected {
+    color: var(--text-primary);
+    background: var(--bg-tertiary);
+}
+
+.btn-reopen {
+    display: block;
+    margin: 12px auto 0;
+}
+
+/* ===== MENTIONS / OUTLINE ===== */
+.mention-item {
+    padding: 6px 16px;
+    cursor: pointer;
+    font-size: 12px;
+    color: var(--text-secondary);
+    transition: background var(--transition);
+}
+
+.mention-item:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+}
+
+.mention-head {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.mention-head .backlink-name {
+    flex: 1;
+}
+
+.mention-count {
+    color: var(--text-muted);
+    font-size: 11px;
+}
+
+.mention-link {
+    padding: 1px 7px;
+    background: transparent;
+    color: var(--accent);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    font-family: var(--font-ui);
+    font-size: 11px;
+    cursor: pointer;
+}
+
+.mention-link:hover {
+    border-color: var(--accent);
+    background: var(--accent-glow);
+}
+
+.mention-snippet {
+    margin-top: 2px;
+    color: var(--text-muted);
+    font-size: 11px;
+    line-height: 1.4;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+
+.outline-item {
+    padding: 4px 16px;
+    cursor: pointer;
+    font-size: 12px;
+    color: var(--text-secondary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    border-left: 2px solid transparent;
+    transition: all var(--transition);
+}
+
+.outline-item:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+}
+
+.outline-item.active {
+    color: var(--accent);
+    border-left-color: var(--accent);
+}
+
+/* ===== EDITOR MIRROR (medidas) ===== */
+.editor-mirror {
+    position: absolute;
+    top: 0;
+    left: 0;
+    visibility: hidden;
+    pointer-events: none;
+    box-sizing: border-box;
+    white-space: pre-wrap;
+    overflow-wrap: break-word;
+    overflow: hidden;
+}
+
+/* ===== AUTOCOMPLETE ===== */
+.autocomplete {
+    position: absolute;
+    z-index: 20;
+    min-width: 220px;
+    max-width: 360px;
+    list-style: none;
+    padding: 4px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-light);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-md);
+}
+
+.ac-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 5px 8px;
+    border-radius: var(--radius-sm);
+    font-size: 13px;
+    color: var(--text-secondary);
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+.ac-item.active {
+    background: var(--bg-active);
+    color: var(--text-primary);
+}
+
+.ac-label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.ac-detail {
+    margin-left: auto;
+    color: var(--text-muted);
+    font-size: 11px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* ===== QUICK SWITCHER ===== */
+.modal-overlay.modal-top {
+    align-items: flex-start;
+    padding-top: 12vh;
+}
+
+.modal.switcher {
+    width: min(560px, calc(100vw - 32px));
+    padding: 12px;
+}
+
+.modal.switcher input[type="text"] {
+    margin-bottom: 8px;
+}
+
+.switcher-list {
+    list-style: none;
+    max-height: 50vh;
+    overflow-y: auto;
+}
+
+.switcher-item {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    padding: 7px 10px;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    font-size: 13px;
+    color: var(--text-secondary);
+}
+
+.switcher-item.active {
+    background: var(--bg-active);
+    color: var(--text-primary);
+}
+
+.switcher-title {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.switcher-path {
+    margin-left: auto;
+    color: var(--text-muted);
+    font-size: 11px;
+    white-space: nowrap;
+}
+
+.switcher-hint {
+    padding: 8px 10px 0;
+    color: var(--text-muted);
+    font-size: 11px;
+}
+
+/* ===== FRONTMATTER ===== */
+.markdown-body table.frontmatter {
+    width: auto;
+    font-size: 13px;
+    margin-bottom: 24px;
+}
+
+.markdown-body table.frontmatter th,
+.markdown-body table.frontmatter td {
+    border: none;
+    border-bottom: 1px solid var(--border);
+    padding: 4px 16px 4px 0;
+    background: none;
+}
+
+.markdown-body table.frontmatter th {
+    color: var(--text-muted);
+    font-weight: 500;
+}
+
+.markdown-body table.frontmatter tr {
+    background: none;
+}
+
+.fm-tag {
+    display: inline-block;
+    padding: 0 8px;
+    border-radius: 10px;
+    background: var(--accent-glow);
+    color: var(--accent);
+    font-size: 12px;
+}
+
+/* ===== CALLOUTS ===== */
+.markdown-body .callout {
+    --c: #58a6ff;
+    margin: 0 0 16px;
+    padding: 10px 16px;
+    border-left: 3px solid var(--c);
+    border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+    background: color-mix(in srgb, var(--c) 10%, transparent);
+}
+
+.markdown-body .callout-title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--c);
+    font-weight: 600;
+}
+
+.markdown-body summary.callout-title {
+    cursor: pointer;
+}
+
+.markdown-body .callout-content > :first-child {
+    margin-top: 8px;
+}
+
+.markdown-body .callout-content > :last-child {
+    margin-bottom: 0;
+}
+
+.markdown-body .callout-tip,
+.markdown-body .callout-abstract { --c: #39c5cf; }
+.markdown-body .callout-success { --c: #3fb950; }
+.markdown-body .callout-question,
+.markdown-body .callout-warning { --c: #d29922; }
+.markdown-body .callout-danger { --c: #f85149; }
+.markdown-body .callout-example { --c: #a371f7; }
+.markdown-body .callout-quote { --c: #8b949e; }
+
+/* ===== NOTE EMBEDS ===== */
+.markdown-body .note-embed {
+    display: block;
+    margin: 0 0 16px;
+    padding: 4px 0 4px 16px;
+    border-left: 3px solid var(--border-light);
+}
+
+.markdown-body .note-embed-title {
+    display: block;
+    margin-bottom: 4px;
+    font-size: 12px;
+}
+
+.markdown-body .note-embed-missing {
+    color: var(--warning);
+    font-size: 13px;
+    font-style: italic;
 }
